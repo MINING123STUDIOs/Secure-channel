@@ -1,110 +1,77 @@
+import customtkinter as ctk
 import tkinter as tk
-from tkinter import filedialog, scrolledtext, messagebox
-import threading
+from tkinter import filedialog
 import subprocess
+import threading
 import sys
-import os
 
-# =========================
-# 🌸 GUI APP
-# =========================
+ctk.set_appearance_mode("dark")
+ctk.set_default_color_theme("blue")
 
-class TLSFileGUI:
-    def __init__(self, root):
-        self.root = root
-        self.root.title("TLS File Sender GUI")
-        self.root.geometry("700x500")
+
+class App(ctk.CTk):
+    def __init__(self):
+        super().__init__()
+
+        self.title("TLS File Sender")
+        self.geometry("750x520")
 
         self.process = None
 
-        # =========================
-        # MODE SELECT
-        # =========================
-        self.mode_var = tk.StringVar(value="client")
+        # =====================
+        # MODE
+        # =====================
+        self.mode = ctk.CTkSegmentedButton(
+            self,
+            values=["client", "server"]
+        )
+        self.mode.set("client")
+        self.mode.pack(pady=10)
 
-        frame_top = tk.Frame(root)
-        frame_top.pack(pady=10)
+        # =====================
+        # CONNECTION FRAME
+        # =====================
+        frame = ctk.CTkFrame(self)
+        frame.pack(pady=10, fill="x", padx=10)
 
-        tk.Radiobutton(frame_top, text="Client", variable=self.mode_var, value="client").pack(side=tk.LEFT)
-        tk.Radiobutton(frame_top, text="Server", variable=self.mode_var, value="server").pack(side=tk.LEFT)
+        self.host = ctk.CTkEntry(frame, placeholder_text="Host")
+        self.host.insert(0, "127.0.0.1")
+        self.host.pack(side="left", padx=5)
 
-        # =========================
-        # CONNECTION SETTINGS
-        # =========================
-        frame_conn = tk.Frame(root)
-        frame_conn.pack(pady=5)
+        self.port = ctk.CTkEntry(frame, placeholder_text="Port", width=80)
+        self.port.insert(0, "5001")
+        self.port.pack(side="left", padx=5)
 
-        tk.Label(frame_conn, text="Host:").grid(row=0, column=0)
-        self.host_entry = tk.Entry(frame_conn)
-        self.host_entry.insert(0, "127.0.0.1")
-        self.host_entry.grid(row=0, column=1)
+        # =====================
+        # BUTTONS
+        # =====================
+        btn_frame = ctk.CTkFrame(self)
+        btn_frame.pack(pady=10)
 
-        tk.Label(frame_conn, text="Port:").grid(row=0, column=2)
-        self.port_entry = tk.Entry(frame_conn)
-        self.port_entry.insert(0, "5001")
-        self.port_entry.grid(row=0, column=3)
+        ctk.CTkButton(btn_frame, text="Start", command=self.start).pack(side="left", padx=5)
+        ctk.CTkButton(btn_frame, text="Stop", command=self.stop).pack(side="left", padx=5)
+        ctk.CTkButton(btn_frame, text="Send File", command=self.send_file).pack(side="left", padx=5)
 
-        # =========================
-        # CERT SETTINGS (server only relevant)
-        # =========================
-        frame_cert = tk.Frame(root)
-        frame_cert.pack(pady=5)
+        # =====================
+        # LOG BOX
+        # =====================
+        self.log = ctk.CTkTextbox(self, width=700, height=350)
+        self.log.pack(padx=10, pady=10)
 
-        tk.Label(frame_cert, text="Cert:").grid(row=0, column=0)
-        self.cert_entry = tk.Entry(frame_cert, width=25)
-        self.cert_entry.insert(0, "cert.pem")
-        self.cert_entry.grid(row=0, column=1)
+    def write(self, msg):
+        self.log.insert("end", msg + "\n")
+        self.log.see("end")
 
-        tk.Label(frame_cert, text="Key:").grid(row=0, column=2)
-        self.key_entry = tk.Entry(frame_cert, width=25)
-        self.key_entry.insert(0, "key.pem")
-        self.key_entry.grid(row=0, column=3)
-
-        # =========================
-        # CONTROLS
-        # =========================
-        frame_btn = tk.Frame(root)
-        frame_btn.pack(pady=10)
-
-        self.start_btn = tk.Button(frame_btn, text="Start", command=self.start)
-        self.start_btn.pack(side=tk.LEFT, padx=5)
-
-        self.stop_btn = tk.Button(frame_btn, text="Stop", command=self.stop)
-        self.stop_btn.pack(side=tk.LEFT, padx=5)
-
-        self.send_file_btn = tk.Button(frame_btn, text="Send File", command=self.send_file)
-        self.send_file_btn.pack(side=tk.LEFT, padx=5)
-
-        # =========================
-        # LOG OUTPUT
-        # =========================
-        self.log_box = scrolledtext.ScrolledText(root, height=20)
-        self.log_box.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
-
-    # =========================
-    # 🧾 LOGGING
-    # =========================
-    def log(self, msg):
-        self.log_box.insert(tk.END, msg + "\n")
-        self.log_box.see(tk.END)
-
-    # =========================
-    # 🚀 START SERVER/CLIENT
-    # =========================
     def start(self):
-        mode = self.mode_var.get()
-        host = self.host_entry.get()
-        port = self.port_entry.get()
+        cmd = [
+            sys.executable,
+            "cli.py",
+            "--mode", self.mode.get(),
+            "--host", self.host.get(),
+            "--port", self.port.get()
+        ]
 
-        cert = self.cert_entry.get()
-        key = self.key_entry.get()
-
-        cmd = [sys.executable, "cli.py", "--mode", mode, "--host", host, "--port", port]
-
-        if mode == "server":
-            cmd += ["--cert", cert, "--key", key]
-
-        self.log(f"[STARTING] {' '.join(cmd)}")
+        self.write("[START] " + " ".join(cmd))
 
         self.process = subprocess.Popen(
             cmd,
@@ -115,60 +82,38 @@ class TLSFileGUI:
 
         threading.Thread(target=self.read_output, daemon=True).start()
 
-    # =========================
-    # 📡 READ CLI OUTPUT
-    # =========================
     def read_output(self):
-        if not self.process:
-            return
-
         for line in self.process.stdout:
-            self.log(line.strip())
+            self.write(line.strip())
 
-    # =========================
-    # 🛑 STOP PROCESS
-    # =========================
     def stop(self):
         if self.process:
             self.process.terminate()
-            self.log("[STOPPED]")
+            self.write("[STOPPED]")
             self.process = None
 
-    # =========================
-    # 📁 SEND FILE
-    # =========================
     def send_file(self):
-        if self.mode_var.get() != "client":
-            messagebox.showinfo("Info", "Switch to Client mode to send files.")
+        if self.mode.get() != "client":
+            self.write("Switch to client mode first")
             return
 
-        file_path = filedialog.askopenfilename()
-
-        if not file_path:
+        file = filedialog.askopenfilename()
+        if not file:
             return
 
-        self.log(f"[SENDING FILE] {file_path}")
+        self.write(f"[FILE] {file}")
 
-        # send file via CLI by running a temporary process
-        host = self.host_entry.get()
-        port = self.port_entry.get()
-
-        # feed file path to stdin
         proc = subprocess.Popen(
-            [sys.executable, "cli.py", "--mode", "client", "--host", host, "--port", port],
+            [sys.executable, "cli.py", "--mode", "client", "--host", self.host.get(), "--port", self.port.get()],
             stdin=subprocess.PIPE,
             text=True
         )
 
-        proc.stdin.write(file_path + "\nexit\n")
+        proc.stdin.write(file + "\nexit\n")
         proc.stdin.flush()
         proc.stdin.close()
 
-# =========================
-# 🧭 RUN GUI
-# =========================
 
 if __name__ == "__main__":
-    root = tk.Tk()
-    app = TLSFileGUI(root)
-    root.mainloop() 
+    app = App()
+    app.mainloop() 
