@@ -8,10 +8,9 @@ import sys
 import hashlib
 import time
 import logging
-from datetime import datetime
 
 # =========================
-# 🌸 CONFIG + CONSTANTS
+# 🌸 CONFIG
 # =========================
 
 SAVE_DIR = "received_files"
@@ -19,10 +18,9 @@ os.makedirs(SAVE_DIR, exist_ok=True)
 
 LOG_FILE = "tlssender.log"
 
-MAGIC = b"TLSF"   # protocol identifier
+MAGIC = b"TLSF"
 VERSION = 1
 
-# Message types
 MSG_FILE_BEGIN = 0x01
 MSG_KEEPALIVE  = 0x02
 MSG_ERROR      = 0x03
@@ -61,13 +59,11 @@ def recv_exact(conn, n):
         data += chunk
     return data
 
-
 def send_all(conn, data):
     conn.sendall(data)
 
-
 # =========================
-# 🔐 TLS CONTEXTS
+# 🔐 TLS
 # =========================
 
 def create_server_context(certfile, keyfile):
@@ -78,17 +74,11 @@ def create_server_context(certfile, keyfile):
 
 
 def create_client_context(cafile=None, insecure=False):
-    """
-    insecure=True is ONLY for local testing.
-    """
     if insecure:
-        ctx = ssl._create_unverified_context()
-        ctx.minimum_version = ssl.TLSVersion.TLSv1_2
-        return ctx
+        return ssl._create_unverified_context()
 
     ctx = ssl.create_default_context(ssl.Purpose.SERVER_AUTH)
 
-    # If no CA provided, system trust store is used
     if cafile:
         ctx.load_verify_locations(cafile=cafile)
 
@@ -98,18 +88,14 @@ def create_client_context(cafile=None, insecure=False):
 
     return ctx
 
-
 # =========================
-# 📦 FILE UTILITIES
+# 📦 FILE UTILS
 # =========================
 
 def sha256_file(path):
     h = hashlib.sha256()
     with open(path, "rb") as f:
-        while True:
-            chunk = f.read(CHUNK_SIZE)
-            if not chunk:
-                break
+        while chunk := f.read(CHUNK_SIZE):
             h.update(chunk)
     return h.digest()
 
@@ -119,29 +105,13 @@ def safe_filename(name):
     base, ext = os.path.splitext(name)
 
     candidate = name
-    counter = 1
+    i = 1
 
     while os.path.exists(os.path.join(SAVE_DIR, candidate)):
-        candidate = f"{base}({counter}){ext}"
-        counter += 1
+        candidate = f"{base}({i}){ext}"
+        i += 1
 
     return candidate
-
-
-# =========================
-# 📊 PROGRESS DISPLAY
-# =========================
-
-def format_speed(bytes_sent, start_time):
-    elapsed = max(time.time() - start_time, 0.0001)
-    return bytes_sent / elapsed
-
-
-def format_eta(total, sent, speed):
-    if speed <= 0:
-        return "?"
-    remaining = total - sent
-    return remaining / speed
 
 # =========================
 # 📡 KEEPALIVE
@@ -153,9 +123,8 @@ def send_keepalive(conn):
     except Exception:
         pass
 
-
 # =========================
-# 📤 SENDING FILES
+# 📤 SEND FILE
 # =========================
 
 def send_file(conn, filepath):
@@ -163,12 +132,8 @@ def send_file(conn, filepath):
     filesize = os.path.getsize(filepath)
     filehash = sha256_file(filepath)
 
-    start_time = time.time()
-    sent = 0
-
     log(f"[SEND] {filename} ({filesize} bytes)")
 
-    # FILE_BEGIN packet
     header = (
         bytes([MSG_FILE_BEGIN]) +
         struct.pack("!I", len(filename)) +
@@ -179,53 +144,40 @@ def send_file(conn, filepath):
 
     send_all(conn, header)
 
-    # stream file
-    with open(filepath, "rb") as f:
-        while True:
-            chunk = f.read(CHUNK_SIZE)
-            if not chunk:
-                break
+    sent = 0
+    start = time.time()
 
+    with open(filepath, "rb") as f:
+        while chunk := f.read(CHUNK_SIZE):
             send_all(conn, chunk)
             sent += len(chunk)
 
-            speed = format_speed(sent, start_time)
-            eta = format_eta(filesize, sent, speed)
+            speed = sent / max(time.time() - start, 0.0001)
 
             print(
-                f"\r{sent}/{filesize} bytes "
-                f"| {speed/1024/1024:.2f} MB/s "
-                f"| ETA {eta:.1f}s",
-                end="",
-                flush=True
+                f"\r{sent}/{filesize} bytes | "
+                f"{speed/1024/1024:.2f} MB/s",
+                end=""
             )
 
     print("\n[SEND COMPLETE]")
-    logging.info(f"Sent {filename} successfully")
-
 
 # =========================
-# 📥 RECEIVING FILES
+# 📥 RECEIVE FILES
 # =========================
 
 def handle_incoming(conn):
-    """
-    Handles incoming stream (runs in background thread)
-    """
-
     try:
         while True:
             msg_type = recv_exact(conn, 1)[0]
 
-            # -------------------------
-            # KEEPALIVE
-            # -------------------------
             if msg_type == MSG_KEEPALIVE:
                 continue
 
-            # -------------------------
-            # FILE TRANSFER
-            # -------------------------
+            if msg_type == MSG_GOODBYE:
+                log("[REMOTE CLOSED CONNECTION]")
+                break
+
             if msg_type == MSG_FILE_BEGIN:
                 name_len = struct.unpack("!I", recv_exact(conn, 4))[0]
                 file_size = struct.unpack("!Q", recv_exact(conn, 8))[0]
@@ -238,8 +190,6 @@ def handle_incoming(conn):
                 log(f"[RECV] {filename} ({file_size} bytes)")
 
                 received = 0
-                start_time = time.time()
-
                 h = hashlib.sha256()
 
                 try:
@@ -247,82 +197,56 @@ def handle_incoming(conn):
                         while received < file_size:
                             chunk = conn.recv(min(CHUNK_SIZE, file_size - received))
                             if not chunk:
-                                raise ConnectionError("Connection lost during transfer")
+                                raise ConnectionError("Lost connection")
 
                             f.write(chunk)
                             h.update(chunk)
-
                             received += len(chunk)
 
-                            speed = format_speed(received, start_time)
-                            eta = format_eta(file_size, received, speed)
+                            print(f"\r{received}/{file_size} bytes", end="")
 
-                            print(
-                                f"\r{received}/{file_size} bytes "
-                                f"| {speed/1024/1024:.2f} MB/s "
-                                f"| ETA {eta:.1f}s",
-                                end="",
-                                flush=True
-                            )
-
-                    print("\n[WRITE COMPLETE] Verifying hash...")
+                    print("\n[RECEIVED COMPLETE]")
 
                     if h.digest() != file_hash:
-                        log_error("[ERROR] Hash mismatch! File corrupted.")
+                        log_error("[HASH MISMATCH]")
                         os.remove(path)
                         continue
 
                     log(f"[OK] Saved {path}")
 
                 except Exception as e:
-                    log_error(f"[RECV ERROR] {e}")
-
+                    log_error(f"[ERROR] {e}")
                     if os.path.exists(path):
                         os.remove(path)
 
     except Exception as e:
         log_error(f"[CONNECTION ERROR] {e}")
 
-
 # =========================
-# 💬 INTERACTIVE SENDER
+# 💬 SENDER LOOP
 # =========================
 
 def interactive_sender(conn):
-    log("Type file paths to send. Type 'exit' to quit.")
+    log("Type file paths or 'exit'")
 
     while True:
-        try:
-            path = input("> ").strip()
+        path = input("> ").strip()
 
-            if path.lower() == "exit":
-                try:
-                    conn.sendall(bytes([MSG_GOODBYE]))
-                except Exception:
-                    pass
-
-                try:
-                    conn.shutdown(socket.SHUT_RDWR)
-                except Exception:
-                    pass
-
-                conn.close()
-                break
-
-            if os.path.isfile(path):
-                send_file(conn, path)
-            else:
-                log_error("Not a valid file path")
-
-        except (EOFError, KeyboardInterrupt):
+        if path.lower() == "exit":
             try:
-                conn.close()
-            except Exception:
+                conn.sendall(bytes([MSG_GOODBYE]))
+            except:
                 pass
+            conn.close()
             break
 
+        if os.path.isfile(path):
+            send_file(conn, path)
+        else:
+            log_error("Invalid file")
+
 # =========================
-# 🌐 SERVER (MULTI-CLIENT)
+# 🌐 SERVER
 # =========================
 
 def client_thread(conn, addr):
@@ -330,95 +254,72 @@ def client_thread(conn, addr):
     try:
         handle_incoming(conn)
     finally:
-        try:
-            conn.close()
-        except Exception:
-            pass
+        conn.close()
         log(f"[DISCONNECTED] {addr}")
 
 
 def run_server(host, port, cert, key):
     ctx = create_server_context(cert, key)
 
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        sock.bind((host, port))
-        sock.listen()
+    sock = socket.socket()
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    sock.bind((host, port))
+    sock.listen()
 
-        log(f"[SERVER] Listening on {host}:{port}")
+    log(f"[SERVER] {host}:{port}")
 
-        while True:
-            conn, addr = sock.accept()
+    while True:
+        conn, addr = sock.accept()
+        tls = ctx.wrap_socket(conn, server_side=True)
 
-            try:
-                tls_conn = ctx.wrap_socket(conn, server_side=True)
-            except Exception as e:
-                log_error(f"[TLS ERROR] {e}")
-                conn.close()
-                continue
-
-            threading.Thread(
-                target=client_thread,
-                args=(tls_conn, addr),
-                daemon=True
-            ).start()
-
+        threading.Thread(
+            target=client_thread,
+            args=(tls, addr),
+            daemon=True
+        ).start()
 
 # =========================
 # 💻 CLIENT
 # =========================
 
 def run_client(host, port, insecure=False, cafile=None):
-    ctx = create_client_context(cafile=cafile, insecure=insecure)
+    ctx = create_client_context(cafile, insecure)
 
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-        tls_conn = ctx.wrap_socket(sock, server_hostname=host)
+    sock = socket.socket()
+    sock.connect((host, port))   # FIXED ORDER
 
-        tls_conn.connect((host, port))
-        log(f"[CLIENT] Connected to {host}:{port}")
+    conn = ctx.wrap_socket(sock, server_hostname=host)
 
-        threading.Thread(
-            target=handle_incoming,
-            args=(tls_conn,),
-            daemon=True
-        ).start()
+    log("[CLIENT CONNECTED]")
 
-        interactive_sender(tls_conn)
+    threading.Thread(
+        target=handle_incoming,
+        args=(conn,),
+        daemon=True
+    ).start()
 
+    interactive_sender(conn)
 
 # =========================
-# 🧭 MAIN CLI
+# 🧭 MAIN
 # =========================
 
 def main():
-    parser = argparse.ArgumentParser(description="TLS File Sender (Upgraded)")
+    p = argparse.ArgumentParser()
+    p.add_argument("--mode", choices=["server", "client"], required=True)
+    p.add_argument("--host", default="0.0.0.0")
+    p.add_argument("--port", type=int, default=5001)
+    p.add_argument("--cert", default="cert.pem")
+    p.add_argument("--key", default="key.pem")
+    p.add_argument("--insecure", action="store_true")
+    p.add_argument("--cafile", default=None)
 
-    parser.add_argument("--mode", choices=["server", "client"], required=True)
-    parser.add_argument("--host", default="0.0.0.0")
-    parser.add_argument("--port", type=int, default=5001)
-
-    parser.add_argument("--cert", default="cert.pem")
-    parser.add_argument("--key", default="key.pem")
-
-    parser.add_argument("--cafile", default=None)
-    parser.add_argument("--insecure", action="store_true")
-
-    args = parser.parse_args()
+    args = p.parse_args()
 
     if args.mode == "server":
-        if not os.path.exists(args.cert) or not os.path.exists(args.key):
-            sys.exit("Missing cert/key. Generate with OpenSSL first.")
-
         run_server(args.host, args.port, args.cert, args.key)
-
     else:
-        run_client(
-            args.host,
-            args.port,
-            insecure=args.insecure,
-            cafile=args.cafile
-        )
-
+        run_client(args.host, args.port, args.insecure, args.cafile)
 
 if __name__ == "__main__":
     main()
