@@ -78,13 +78,37 @@ button:hover { background:#1d4ed8; }
   .row { grid-template-columns: 1fr; }
 }
 
-.hidden { display:none; }
 </style>
 </head>
 
 <body>
 <div class="container">
-<h1>🔐 Secure Channel Assistant v2 (ECDH + AES-GCM + HMAC)</h1>
+
+<h1>🔐 Secure Channel Assistant v2</h1>
+
+<!-- NEW: EXPLANATION PANEL -->
+<div class="panel">
+  <h3>🧭 How this works (simple view)</h3>
+
+  <p><b>1. Key generation</b><br>
+  Your browser creates a private key (secret) and a public key (shareable). The private key never leaves your device.</p>
+
+  <p><b>2. Key exchange</b><br>
+  When you paste someone else’s public key, both sides combine secrets to create a shared “conversation key”.</p>
+
+  <p><b>3. Encryption</b><br>
+  Your message is turned into unreadable ciphertext using AES encryption. Without the shared key, it looks like random noise.</p>
+
+  <p><b>4. Authentication</b><br>
+  A built-in integrity check ensures the message was not modified or faked. If tampered, decryption fails.</p>
+
+  <p><b>5. Decryption</b><br>
+  Only someone with the matching shared key can restore the original message.</p>
+
+  <p class="small">
+  Note: This is a browser-based simulation for learning cryptography concepts. It is not intended for real-world secure communication.
+  </p>
+</div>
 
 <div class="panel">
   <h3>1. Key Generation</h3>
@@ -119,7 +143,7 @@ button:hover { background:#1d4ed8; }
     <h3>3. Encrypt</h3>
     <textarea id="msg" placeholder="Message..."></textarea>
     <button onclick="encrypt()">Encrypt</button>
-    <button class="iconbtn" onclick="copy('cipherOut')">📋</button>
+    <button onclick="copy('cipherOut')">📋 Copy</button>
     <pre id="cipherOut"></pre>
   </div>
 
@@ -183,7 +207,6 @@ async function derive(){
     ["encrypt","decrypt"]
   );
 
-  // derive HMAC key from same material (separate binding layer)
   const raw = await crypto.subtle.exportKey("raw",
     await crypto.subtle.deriveBits(
       { name:"ECDH", public: peerKey },
@@ -201,12 +224,10 @@ async function derive(){
   );
 
   document.getElementById("status").textContent =
-    "✔ Shared keys established (AES-GCM + HMAC-SHA256)";
+    "✔ Secure session established";
 }
 
 async function encrypt(){
-  if(!sharedKey || !hmacKey) return alert("No shared secret");
-
   const iv = crypto.getRandomValues(new Uint8Array(12));
   const data = new TextEncoder().encode(document.getElementById("msg").value);
 
@@ -216,29 +237,27 @@ async function encrypt(){
     data
   );
 
-  const packetBase = iv.toString() + b64(cipher);
+  const base = iv.toString() + b64(cipher);
 
-  const sig = await crypto.subtle.sign(
+  const mac = await crypto.subtle.sign(
     "HMAC",
     hmacKey,
-    new TextEncoder().encode(packetBase)
+    new TextEncoder().encode(base)
   );
 
   const payload = {
     v:1,
     iv: b64(iv),
     data: b64(cipher),
-    mac: b64(sig),
+    mac: b64(mac),
     ts: Date.now()
   };
 
-  const out = JSON.stringify(payload,null,2);
-  document.getElementById("cipherOut").textContent = out;
+  document.getElementById("cipherOut").textContent =
+    JSON.stringify(payload, null, 2);
 }
 
 async function decrypt(){
-  if(!sharedKey || !hmacKey) return alert("No shared secret");
-
   try {
     const p = JSON.parse(document.getElementById("cipherIn").value);
 
@@ -255,7 +274,7 @@ async function decrypt(){
       new TextEncoder().encode(base)
     );
 
-    if(!ok) throw new Error("auth fail");
+    if(!ok) throw new Error();
 
     const plain = await crypto.subtle.decrypt(
       { name:"AES-GCM", iv },
@@ -268,7 +287,7 @@ async function decrypt(){
 
   } catch(e){
     document.getElementById("plainOut").textContent =
-      "❌ Failed: invalid ciphertext or authentication mismatch";
+      "❌ Authentication failed or invalid message";
   }
 }
 
@@ -277,5 +296,6 @@ function copy(id){
   navigator.clipboard.writeText(el.value || el.textContent);
 }
 </script>
+
 </body>
-</html> 
+</html>
