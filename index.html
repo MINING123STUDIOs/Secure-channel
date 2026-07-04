@@ -1,386 +1,158 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Secure Channel Assistant</title>
-
-    <link rel="stylesheet" href="styles.css">
+<meta charset="UTF-8" />
+<title>Secure Channel Assistant (ECDH + AES-GCM)</title>
+<style>
+body { font-family: Arial, sans-serif; background:#0f172a; color:#e2e8f0; padding:20px; }
+.container { max-width: 1000px; margin:auto; }
+h1 { font-size: 20px; }
+.panel { background:#111827; padding:15px; margin:10px 0; border-radius:10px; }
+textarea, input {
+  width:100%; padding:10px; margin-top:5px;
+  background:#0b1220; color:#e2e8f0; border:1px solid #334155;
+  border-radius:8px;
+}
+button {
+  margin-top:10px; padding:10px;
+  background:#2563eb; border:none; color:white;
+  border-radius:8px; cursor:pointer;
+}
+button:hover { background:#1d4ed8; }
+.row { display:flex; gap:10px; }
+.col { flex:1; }
+small { color:#94a3b8; }
+pre { white-space: pre-wrap; word-break: break-word; }
+</style>
 </head>
 <body>
+<div class="container">
+<h1>🔐 Secure Channel Assistant (ECDH + AES-GCM Demo)</h1>
 
-<header>
-    <h1>🔐 Secure Channel Assistant</h1>
-    <p>Offline cryptographic helper using the Web Crypto API</p>
-</header>
+<div class="panel">
+  <h3>1. Key Generation (Local)</h3>
+  <button onclick="generateKeys()">Generate Key Pair</button>
+  <pre id="keys"></pre>
+</div>
 
-<nav>
-    <button data-tab="keys">Keys</button>
-    <button data-tab="exchange">Key Exchange</button>
-    <button data-tab="encrypt">Encrypt</button>
-    <button data-tab="decrypt">Decrypt</button>
-    <button data-tab="sign">Sign</button>
-    <button data-tab="verify">Verify</button>
-    <button data-tab="hash">Hash</button>
-    <button data-tab="random">Random</button>
-    <button data-tab="encoding">Encoding</button>
-</nav>
+<div class="panel">
+  <h3>2. Shared Secret Derivation</h3>
+  <p><small>Paste peer public key (base64):</small></p>
+  <textarea id="peerKey"></textarea>
+  <button onclick="deriveSecret()">Derive Shared Key</button>
+  <pre id="secretOut"></pre>
+</div>
 
-<main>
+<div class="panel row">
+  <div class="col">
+    <h3>3. Encrypt Message</h3>
+    <textarea id="plain" placeholder="Type message..."></textarea>
+    <button onclick="encryptMsg()">Encrypt</button>
+    <pre id="cipherOut"></pre>
+  </div>
 
-<!-- ======================================================= -->
-<section id="keys" class="tab active">
-
-<h2>Key Generation</h2>
-
-<div class="card">
-
-<button id="generateKeys">
-Generate ECDH Key Pair
-</button>
-
-<h3>Public Key</h3>
-
-<textarea
-id="publicKey"
-readonly
-rows="8"
-placeholder="Public key appears here..."
-></textarea>
-
-<button class="copy" data-copy="publicKey">
-Copy
-</button>
-
-<h3>Private Key</h3>
-
-<textarea
-id="privateKey"
-readonly
-rows="8"
-placeholder="Private key appears here..."
-></textarea>
-
-<button class="copy" data-copy="privateKey">
-Copy
-</button>
+  <div class="col">
+    <h3>4. Decrypt Message</h3>
+    <textarea id="cipher" placeholder="Paste ciphertext JSON..."></textarea>
+    <button onclick="decryptMsg()">Decrypt</button>
+    <pre id="plainOut"></pre>
+  </div>
+</div>
 
 </div>
 
-</section>
-
-<!-- ======================================================= -->
-
-<section id="exchange" class="tab">
-
-<h2>Shared Secret</h2>
-
-<div class="card">
-
-<label>Your Private Key</label>
-
-<textarea
-id="exchangePrivate"
-rows="8"
-></textarea>
-
-<label>Peer Public Key</label>
-
-<textarea
-id="exchangePublic"
-rows="8"
-></textarea>
-
-<button id="deriveSecret">
-Derive Shared Secret
-</button>
-
-<h3>Derived AES Key</h3>
-
-<textarea
-id="sharedSecret"
-readonly
-rows="8"
-></textarea>
-
-</div>
-
-</section>
-
-<!-- ======================================================= -->
-
-<section id="encrypt" class="tab">
-
-<h2>Encrypt</h2>
-
-<div class="card">
-
-<label>AES Key (Base64)</label>
-
-<textarea id="aesEncryptKey" rows="5"></textarea>
-
-<label>Plaintext</label>
-
-<textarea id="plaintext" rows="8"></textarea>
-
-<button id="encryptButton">
-Encrypt
-</button>
-
-<h3>IV</h3>
-
-<textarea
-id="ivOutput"
-readonly
-rows="2"
-></textarea>
-
-<h3>Ciphertext</h3>
-
-<textarea
-id="ciphertext"
-readonly
-rows="10"
-></textarea>
-
-</div>
-
-</section>
-
-<!-- ======================================================= -->
-
-<section id="decrypt" class="tab">
-
-<h2>Decrypt</h2>
-
-<div class="card">
-
-<label>AES Key</label>
-
-<textarea id="aesDecryptKey" rows="5"></textarea>
-
-<label>IV</label>
-
-<textarea id="decryptIV" rows="2"></textarea>
-
-<label>Ciphertext</label>
-
-<textarea id="decryptCiphertext" rows="10"></textarea>
-
-<button id="decryptButton">
-Decrypt
-</button>
-
-<h3>Plaintext</h3>
-
-<textarea
-id="decryptedText"
-readonly
-rows="8"
-></textarea>
-
-</div>
-
-</section>
-
-<!-- ======================================================= -->
-
-<section id="sign" class="tab">
-
-<h2>Digital Signature</h2>
-
-<div class="card">
-
-<button id="generateSignKeys">
-Generate Signing Keys
-</button>
-
-<label>Message</label>
-
-<textarea id="signMessage" rows="8"></textarea>
-
-<button id="signButton">
-Sign
-</button>
-
-<h3>Signature</h3>
-
-<textarea
-id="signature"
-readonly
-rows="8"
-></textarea>
-
-</div>
-
-</section>
-
-<!-- ======================================================= -->
-
-<section id="verify" class="tab">
-
-<h2>Verify Signature</h2>
-
-<div class="card">
-
-<label>Message</label>
-
-<textarea id="verifyMessage" rows="8"></textarea>
-
-<label>Signature</label>
-
-<textarea id="verifySignature" rows="8"></textarea>
-
-<button id="verifyButton">
-Verify
-</button>
-
-<p id="verifyResult">
-No verification performed.
-</p>
-
-</div>
-
-</section>
-
-<!-- ======================================================= -->
-
-<section id="hash" class="tab">
-
-<h2>Hash Utility</h2>
-
-<div class="card">
-
-<select id="hashAlgorithm">
-
-<option value="SHA-256">
-SHA-256
-</option>
-
-<option value="SHA-384">
-SHA-384
-</option>
-
-<option value="SHA-512">
-SHA-512
-</option>
-
-</select>
-
-<textarea
-id="hashInput"
-rows="8"
-></textarea>
-
-<button id="hashButton">
-Compute Hash
-</button>
-
-<textarea
-id="hashOutput"
-readonly
-rows="8"
-></textarea>
-
-</div>
-
-</section>
-
-<!-- ======================================================= -->
-
-<section id="random" class="tab">
-
-<h2>Secure Random Generator</h2>
-
-<div class="card">
-
-<label>Bytes</label>
-
-<input
-type="number"
-id="randomLength"
-value="32"
-min="1"
-max="4096"
->
-
-<button id="randomButton">
-Generate
-</button>
-
-<textarea
-id="randomOutput"
-readonly
-rows="8"
-></textarea>
-
-</div>
-
-</section>
-
-<!-- ======================================================= -->
-
-<section id="encoding" class="tab">
-
-<h2>Encoding Utilities</h2>
-
-<div class="card">
-
-<textarea
-id="encodingInput"
-rows="8"
-placeholder="Enter text..."
-></textarea>
-
-<div class="button-row">
-
-<button id="toHex">
-Text → Hex
-</button>
-
-<button id="fromHex">
-Hex → Text
-</button>
-
-<button id="toBase64">
-Text → Base64
-</button>
-
-<button id="fromBase64">
-Base64 → Text
-</button>
-
-</div>
-
-<textarea
-id="encodingOutput"
-readonly
-rows="8"
-></textarea>
-
-</div>
-
-</section>
-
-</main>
-
-<footer>
-
-<p>
-Runs entirely offline using your browser's Web Crypto API.
-No information is transmitted anywhere.
-</p>
-
-</footer>
-
-<script src="https://cdn.jsdelivr.net/npm/libsodium-wrappers-sumo@0.7.15/dist/modules/libsodium-wrappers-sumo.js"></script>
-
-<script type="module">
-    import * as crypto from "./crypto.js";
-    import "./app.js";
-
-    window.cryptoAPI = crypto;
+<script>
+let keyPair;
+let sharedKey;
+
+function bufToB64(buf) {
+  return btoa(String.fromCharCode(...new Uint8Array(buf)));
+}
+function b64ToBuf(b64) {
+  return Uint8Array.from(atob(b64), c => c.charCodeAt(0));
+}
+
+async function generateKeys() {
+  keyPair = await crypto.subtle.generateKey(
+    { name: "ECDH", namedCurve: "P-256" },
+    true,
+    ["deriveKey"]
+  );
+
+  const pub = await crypto.subtle.exportKey("spki", keyPair.publicKey);
+
+  document.getElementById("keys").textContent =
+    "Public Key (share this):\n" + bufToB64(pub);
+}
+
+async function deriveSecret() {
+  const peerB64 = document.getElementById("peerKey").value.trim();
+  const peerBuf = b64ToBuf(peerB64);
+
+  const peerKey = await crypto.subtle.importKey(
+    "spki",
+    peerBuf,
+    { name: "ECDH", namedCurve: "P-256" },
+    true,
+    []
+  );
+
+  sharedKey = await crypto.subtle.deriveKey(
+    { name: "ECDH", public: peerKey },
+    keyPair.privateKey,
+    { name: "AES-GCM", length: 256 },
+    false,
+    ["encrypt", "decrypt"]
+  );
+
+  document.getElementById("secretOut").textContent =
+    "✔ Shared AES-GCM key established.";
+}
+
+async function encryptMsg() {
+  if (!sharedKey) return alert("No shared key yet.");
+
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const text = new TextEncoder().encode(document.getElementById("plain").value);
+
+  const ct = await crypto.subtle.encrypt(
+    { name: "AES-GCM", iv },
+    sharedKey,
+    text
+  );
+
+  const payload = {
+    iv: bufToB64(iv),
+    data: bufToB64(ct)
+  };
+
+  document.getElementById("cipherOut").textContent =
+    JSON.stringify(payload, null, 2);
+}
+
+async function decryptMsg() {
+  if (!sharedKey) return alert("No shared key yet.");
+
+  try {
+    const payload = JSON.parse(document.getElementById("cipher").value);
+
+    const iv = b64ToBuf(payload.iv);
+    const data = b64ToBuf(payload.data);
+
+    const pt = await crypto.subtle.decrypt(
+      { name: "AES-GCM", iv },
+      sharedKey,
+      data
+    );
+
+    document.getElementById("plainOut").textContent =
+      new TextDecoder().decode(pt);
+
+  } catch (e) {
+    document.getElementById("plainOut").textContent =
+      "❌ Decryption failed (tampered or wrong key)";
+  }
+}
 </script>
-    
 </body>
-  </html> 
+</html> 
