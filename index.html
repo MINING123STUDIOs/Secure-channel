@@ -241,20 +241,31 @@ async function derive(){
   try {
     if(!kp){
       document.getElementById("status").textContent =
-        "⚠️ Generate keys first";
+        "⚠️ Generate your key pair first";
       return;
     }
 
-    const peer = document.getElementById("peerKey").value.trim();
+    let peer = document.getElementById("peerKey").value.trim();
+
     if(!peer){
       document.getElementById("status").textContent =
-        "⚠️ Paste peer public key";
+        "⚠️ Paste a peer public key";
       return;
+    }
+
+    // CLEAN INPUT (IMPORTANT FIX)
+    peer = peer.replace(/\s+/g, "");
+
+    let peerBytes;
+    try {
+      peerBytes = unb64(peer);
+    } catch(e){
+      throw new Error("Peer key is not valid base64");
     }
 
     const peerKey = await crypto.subtle.importKey(
       "spki",
-      unb64(peer),
+      peerBytes,
       { name:"ECDH", namedCurve:"P-256" },
       true,
       []
@@ -283,12 +294,12 @@ async function derive(){
     );
 
     document.getElementById("status").textContent =
-      "🎉 Shared secret established";
+      "🎉 Shared secret established successfully";
 
   } catch(err){
-    console.error(err);
+    console.error("DERIVE ERROR:", err);
     document.getElementById("status").textContent =
-      "❌ Failed to derive shared secret";
+      "❌ Failed to derive shared secret (check console 🧯)";
   }
 }
 
