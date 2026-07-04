@@ -138,11 +138,22 @@ button:hover {
 <!-- INFO PANEL -->
 <div class="panel">
   <h3>🧭 How it works</h3>
-  <p>🔑 Generate a key pair (private stays on your device)</p>
-  <p>🤝 Exchange public keys with another user</p>
-  <p>🔒 Both sides derive a shared secret</p>
-  <p>✉️ Messages are encrypted with AES-GCM</p>
-  <p>🛡️ Messages include authentication (tamper detection)</p>
+
+  <p><b>1️⃣ Generate your keys.</b> This creates two keys: a 🔓 <b>public key</b> you can share freely, and a 🔐 <b>private key</b> that must stay on this device.</p>
+
+  <p><b>2️⃣ Share only your public key.</b> Send it to the person you want to talk to — over email, chat, whatever. It's safe even if someone else sees it.</p>
+
+  <p><b>🚫 Never share your private key — with anyone, ever.</b> Not your contact, not "support," not a website asking you to "verify" it. Anyone who has it can read your messages and pretend to be you.</p>
+
+  <p><b>3️⃣ Paste their public key</b> into the "Shared Secret" box and create the shared secret. Both of you do this with each other's public key — this step must be done once per conversation.</p>
+
+  <p><b>4️⃣ Encrypt and send.</b> Type a message, hit Encrypt, and copy the scrambled result to your contact through any channel you like.</p>
+
+  <p><b>5️⃣ Decrypt what you receive.</b> Paste what they send you into the Decrypt box to read it.</p>
+
+  <p class="small">⚠️ This tool doesn't send messages for you — it only locks and unlocks them. You're responsible for copying the encrypted text to your contact yourself (email, text, chat — anything works, since it's already unreadable to anyone but them).</p>
+
+  <p class="small">🔄 Refreshing or closing this page erases your keys and session. There's no account, no cloud backup, no recovery — if you need to keep talking, keep the tab open.</p>
 </div>
 
 <!-- KEYS -->
