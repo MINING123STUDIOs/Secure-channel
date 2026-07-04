@@ -203,9 +203,44 @@ button:hover {
 </div>
 
 <script>
-let kp;
-let sharedKey;
-let hmacKey;
+/* =========================================================
+   SECURE CHANNEL — "DOUBLE RATCHET LITE"
+   =========================================================
+   Design notes (read before modifying):
+   - ECDH (P-256) gives the initial shared root secret.
+   - HKDF expands that root into two symmetric chains.
+   - Chains are labeled direction-NEUTRALLY ("chain-A"/"chain-B")
+     and assigned to send/recv by comparing the two public keys.
+     This is required: if both sides labeled their own chains
+     "send"/"recv", each side's "send" key would equal the OTHER
+     side's "send" key too (same root, same label) instead of
+     matching their peer's "recv" key, and nothing would decrypt.
+   - Each message advances its chain (forward secrecy per message),
+     but there is no per-message DH ratchet, so this does NOT give
+     the post-compromise security of full Signal-style Double
+     Ratchet. Hence "Lite".
+   - AES-GCM's built-in tag is the only authentication. A separate
+     HMAC is redundant once GCM is used correctly and was removed.
+   ========================================================= */
+
+let kp = null;
+
+const MAX_SKIP = 1000;        // cap on how far we'll fast-forward a chain
+const MAX_SKIPPED_KEYS = 2000; // cap on stored out-of-order keys (memory safety)
+
+let session = {
+  rootKey: null,
+  sendChain: null,
+  recvChain: null,
+  sendIndex: 0,      // last index we sent
+  recvIndex: 0,      // highest index we've fully processed in order
+  skippedKeys: new Map(), // index -> CryptoKey, for messages received out of order
+  peerPubKeyRaw: null
+};
+
+/* =========================
+   UTIL
+========================= */
 
 function b64(buf){
   return btoa(String.fromCharCode(...new Uint8Array(buf)));
@@ -215,12 +250,47 @@ function unb64(b){
   return Uint8Array.from(atob(b), c => c.charCodeAt(0));
 }
 
+// Deterministic byte comparison, used so both peers agree on
+// chain direction without exchanging any extra metadata.
+function compareBytes(a, b){
+  const len = Math.min(a.length, b.length);
+  for(let i = 0; i < len; i++){
+    if(a[i] !== b[i]) return a[i] - b[i];
+  }
+  return a.length - b.length;
+}
+
+function setStatus(text){
+  document.getElementById("status").textContent = text;
+}
+
+function resetSession(){
+  session = {
+    rootKey: null,
+    sendChain: null,
+    recvChain: null,
+    sendIndex: 0,
+    recvIndex: 0,
+    skippedKeys: new Map(),
+    peerPubKeyRaw: null
+  };
+}
+
+/* =========================
+   KEY GENERATION
+========================= */
+
 async function generateKeys(){
   kp = await crypto.subtle.generateKey(
-    { name:"ECDH", namedCurve:"P-256" },
+    { name: "ECDH", namedCurve: "P-256" },
     true,
-    ["deriveKey", "deriveBits"]   // was just ["deriveKey"]
+    ["deriveKey", "deriveBits"]
   );
+
+  // Generating a fresh identity invalidates any existing session.
+  resetSession();
+  document.getElementById("cipherOut").textContent = "";
+  document.getElementById("plainOut").textContent = "";
 
   const pub = await crypto.subtle.exportKey("spki", kp.publicKey);
   const priv = await crypto.subtle.exportKey("pkcs8", kp.privateKey);
@@ -228,166 +298,283 @@ async function generateKeys(){
   document.getElementById("pubKey").value = b64(pub);
   document.getElementById("privKey").value = b64(priv);
 
-  document.getElementById("status").textContent =
-    "✅ Keys generated successfully";
+  setStatus("✅ Keys generated. Awaiting peer...");
 }
 
-function togglePriv(){
-  const el = document.getElementById("privKey");
-  el.type = el.type === "password" ? "text" : "password";
+/* =========================
+   HKDF CORE
+========================= */
+
+// Chain keys are kept as raw HKDF-importable material (never as
+// AES-GCM keys) precisely so they can be fed back into HKDF to
+// produce the next chain key. Only the leaf "message key" for a
+// single ciphertext becomes an AES-GCM key.
+
+async function hkdfDeriveAesKey(baseKey, salt, info){
+  return await crypto.subtle.deriveKey(
+    {
+      name: "HKDF",
+      salt,
+      info: new TextEncoder().encode(info),
+      hash: "SHA-256"
+    },
+    baseKey,
+    { name: "AES-GCM", length: 256 },
+    false,
+    ["encrypt", "decrypt"]
+  );
 }
+
+async function importChain(rawBits){
+  return await crypto.subtle.importKey(
+    "raw", rawBits, "HKDF", false, ["deriveKey", "deriveBits"]
+  );
+}
+
+async function deriveChainSeed(rootMaterial, info){
+  const bits = await crypto.subtle.deriveBits(
+    {
+      name: "HKDF",
+      salt: ROOT_SALT,
+      info: new TextEncoder().encode(info),
+      hash: "SHA-256"
+    },
+    rootMaterial,
+    256
+  );
+  return await importChain(bits);
+}
+
+const ROOT_SALT = new TextEncoder().encode("secure-demo-salt-v1");
+const CHAIN_SALT = new Uint8Array(0);
+
+/* =========================
+   INITIAL SESSION SETUP
+========================= */
 
 async function derive(){
   try {
     if(!kp){
-      document.getElementById("status").textContent =
-        "⚠️ Generate your key pair first";
+      setStatus("⚠️ Generate your key pair first");
       return;
     }
 
-    let peer = document.getElementById("peerKey").value.trim();
-    if(!peer){
-      document.getElementById("status").textContent =
-        "⚠️ Paste a peer public key";
+    const raw = document.getElementById("peerKey").value.trim();
+    if(!raw){
+      setStatus("⚠️ Paste a peer public key");
+      return;
+    }
+    const peerText = raw.replace(/\s+/g, "");
+
+    let peerPubRaw, peerKey;
+    try {
+      peerPubRaw = unb64(peerText);
+      peerKey = await crypto.subtle.importKey(
+        "spki",
+        peerPubRaw,
+        { name: "ECDH", namedCurve: "P-256" },
+        true,
+        []
+      );
+    } catch(e){
+      setStatus("⚠️ That doesn't look like a valid public key");
       return;
     }
 
-    peer = peer.replace(/\s+/g, "");
-
-    const peerKey = await crypto.subtle.importKey(
-      "spki",
-      unb64(peer),
-      { name:"ECDH", namedCurve:"P-256" },
-      true,
-      []
+    const myPubRaw = new Uint8Array(
+      await crypto.subtle.exportKey("spki", kp.publicKey)
     );
 
-    // 1️⃣ RAW SHARED SECRET (ONLY ONCE)
-    const sharedSecret = await crypto.subtle.deriveBits(
-      { name:"ECDH", public: peerKey },
+    // Refuse to "chat with yourself" — pasting your own key in by
+    // mistake would otherwise silently succeed since the shared
+    // secret math still runs.
+    if(compareBytes(myPubRaw, peerPubRaw) === 0){
+      setStatus("⚠️ That's your own public key, not a peer's");
+      return;
+    }
+
+    const sharedBits = await crypto.subtle.deriveBits(
+      { name: "ECDH", public: peerKey },
       kp.privateKey,
       256
     );
 
-    // 2️⃣ EXPAND INTO KEYS USING HKDF (CORRECT APPROACH)
-    const hkdfKey = await crypto.subtle.importKey(
+    const rootMaterial = await crypto.subtle.importKey(
       "raw",
-      sharedSecret,
+      sharedBits,
       "HKDF",
       false,
       ["deriveKey", "deriveBits"]
     );
 
-    sharedKey = await crypto.subtle.deriveKey(
-      {
-        name: "HKDF",
-        salt: new Uint8Array(16),
-        info: new TextEncoder().encode("aes-key"),
-        hash: "SHA-256"
-      },
-      hkdfKey,
-      { name:"AES-GCM", length:256 },
-      false,
-      ["encrypt","decrypt"]
-    );
+    // Direction-neutral chains, then assign by a rule both sides
+    // compute identically: whoever's public key sorts first (as
+    // raw bytes) uses chain A to send / chain B to receive.
+    const chainA = await deriveChainSeed(rootMaterial, "chain-A");
+    const chainB = await deriveChainSeed(rootMaterial, "chain-B");
 
-    hmacKey = await crypto.subtle.deriveKey(
-      {
-        name: "HKDF",
-        salt: new Uint8Array(16),
-        info: new TextEncoder().encode("hmac-key"),
-        hash: "SHA-256"
-      },
-      hkdfKey,
-      { name:"HMAC", hash:"SHA-256" },
-      false,
-      ["sign","verify"]
-    );
+    const iAmFirst = compareBytes(myPubRaw, peerPubRaw) < 0;
 
-    document.getElementById("status").textContent =
-      "🎉 Shared secret established successfully";
+    resetSession();
+    session.rootKey = rootMaterial;
+    session.peerPubKeyRaw = peerPubRaw;
+    session.sendChain = iAmFirst ? chainA : chainB;
+    session.recvChain = iAmFirst ? chainB : chainA;
 
-  } catch(err){
-    console.error("DERIVE ERROR:", err);
-    document.getElementById("status").textContent =
-      "❌ Failed to derive shared secret (see console)";
+    setStatus("🔐 Secure session established (Double Ratchet Lite)");
+  } catch(e){
+    console.error("DERIVE ERROR:", e);
+    setStatus("❌ Session setup failed (see console)");
   }
 }
 
+/* =========================
+   RATCHET HELPERS
+========================= */
+
+// Deriving BOTH the message key and the next chain key from the
+// same chain key, with distinct info labels, so an attacker who
+// somehow learned a message key cannot walk the chain forward.
+// The chain key itself must stay as raw HKDF material (not an
+// AES-GCM key) so it can be fed into HKDF again next step.
+async function ratchetStep(chainKey){
+  const msgKey = await hkdfDeriveAesKey(chainKey, CHAIN_SALT, "msg");
+  const nextBits = await crypto.subtle.deriveBits(
+    {
+      name: "HKDF",
+      salt: CHAIN_SALT,
+      info: new TextEncoder().encode("chain"),
+      hash: "SHA-256"
+    },
+    chainKey,
+    256
+  );
+  const nextChainKey = await importChain(nextBits);
+  return { msgKey, nextChainKey };
+}
+
+/* =========================
+   ENCRYPT (RATCHETING)
+========================= */
+
 async function encrypt(){
-  if(!sharedKey || !hmacKey)
-    return alert("⚠️ No shared secret");
+  if(!session.sendChain){
+    alert("⚠️ No shared secret — set up a session first");
+    return;
+  }
+
+  const msgText = document.getElementById("msg").value;
+  if(!msgText){
+    alert("⚠️ Nothing to encrypt");
+    return;
+  }
+
+  const { msgKey, nextChainKey } = await ratchetStep(session.sendChain);
+  session.sendChain = nextChainKey;
+  session.sendIndex++;
 
   const iv = crypto.getRandomValues(new Uint8Array(12));
-  const data = new TextEncoder().encode(
-    document.getElementById("msg").value
-  );
 
   const cipher = await crypto.subtle.encrypt(
-    { name:"AES-GCM", iv },
-    sharedKey,
-    data
+    { name: "AES-GCM", iv },
+    msgKey,
+    new TextEncoder().encode(msgText)
   );
 
-  const base = iv.toString() + b64(cipher);
-
-  const mac = await crypto.subtle.sign(
-    "HMAC",
-    hmacKey,
-    new TextEncoder().encode(base)
-  );
-
-  const payload = {
-    v:1,
+  const packet = {
+    v: 1,
     iv: b64(iv),
     data: b64(cipher),
-    mac: b64(mac),
-    ts: Date.now()
+    n: session.sendIndex
   };
 
   document.getElementById("cipherOut").textContent =
-    JSON.stringify(payload, null, 2);
+    JSON.stringify(packet, null, 2);
 }
+
+/* =========================
+   DECRYPT (OUT-OF-ORDER SAFE)
+========================= */
 
 async function decrypt(){
+  const outEl = document.getElementById("plainOut");
   try {
-    const p = JSON.parse(
-      document.getElementById("cipherIn").value
-    );
+    if(!session.recvChain){
+      outEl.textContent = "⚠️ No shared secret — set up a session first";
+      return;
+    }
 
-    const iv = unb64(p.iv);
-    const data = unb64(p.data);
-    const mac = unb64(p.mac);
+    const p = JSON.parse(document.getElementById("cipherIn").value);
+    if(p.v !== 1 || typeof p.n !== "number" || !p.iv || !p.data){
+      throw new Error("malformed packet");
+    }
 
-    const base = iv.toString() + p.data;
+    let msgKey;
 
-    const ok = await crypto.subtle.verify(
-      "HMAC",
-      hmacKey,
-      mac,
-      new TextEncoder().encode(base)
-    );
+    if(session.skippedKeys.has(p.n)){
+      // Late-arriving message we'd already skipped past — use the
+      // stored key and consume it so it can't be replayed.
+      msgKey = session.skippedKeys.get(p.n);
+      session.skippedKeys.delete(p.n);
 
-    if(!ok) throw new Error();
+    } else if(p.n <= session.recvIndex){
+      // Already processed this index (or its key was consumed above
+      // on a prior call) — reject as a duplicate/replay.
+      throw new Error("replayed or already-consumed message index");
+
+    } else {
+      const gap = p.n - session.recvIndex;
+      if(gap > MAX_SKIP){
+        throw new Error("message index too far ahead, refusing to fast-forward");
+      }
+
+      // Fast-forward the chain, stashing keys for any indices we
+      // jump over in case they arrive later out of order.
+      let chainKey = session.recvChain;
+      for(let i = session.recvIndex + 1; i <= p.n; i++){
+        const step = await ratchetStep(chainKey);
+        chainKey = step.nextChainKey;
+
+        if(i === p.n){
+          msgKey = step.msgKey;
+        } else {
+          if(session.skippedKeys.size >= MAX_SKIPPED_KEYS){
+            throw new Error("too many pending out-of-order messages");
+          }
+          session.skippedKeys.set(i, step.msgKey);
+        }
+      }
+
+      session.recvChain = chainKey;
+      session.recvIndex = p.n;
+    }
 
     const plain = await crypto.subtle.decrypt(
-      { name:"AES-GCM", iv },
-      sharedKey,
-      data
+      { name: "AES-GCM", iv: unb64(p.iv) },
+      msgKey,
+      unb64(p.data)
     );
 
-    document.getElementById("plainOut").textContent =
-      "✅ " + new TextDecoder().decode(plain);
+    outEl.textContent = "🔓 " + new TextDecoder().decode(plain);
 
   } catch(e){
-    document.getElementById("plainOut").textContent =
-      "❌ Authentication failed or corrupted message";
+    console.error("DECRYPT ERROR:", e);
+    outEl.textContent = "❌ Decryption failed (bad key, tampered, or replayed message)";
   }
 }
+
+/* =========================
+   COPY + UI HELPERS
+========================= */
 
 function copy(id){
   const el = document.getElementById(id);
   navigator.clipboard.writeText(el.value || el.textContent);
+}
+
+function togglePriv(){
+  const el = document.getElementById("privKey");
+  el.type = el.type === "password" ? "text" : "password";
 }
 </script>
 
