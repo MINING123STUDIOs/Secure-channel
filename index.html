@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
-<title>Secure Channel Assistant v2</title>
+<title>🔐 Secure Channel Assistant v3</title>
 
 <style>
 body {
@@ -77,51 +77,33 @@ button:hover { background:#1d4ed8; }
 @media (max-width: 800px) {
   .row { grid-template-columns: 1fr; }
 }
-
 </style>
 </head>
 
 <body>
 <div class="container">
 
-<h1>🔐 Secure Channel Assistant v2</h1>
+<h1>🔐 Secure Channel Assistant v3 ⚡</h1>
 
-<!-- NEW: EXPLANATION PANEL -->
 <div class="panel">
-  <h3>🧭 How this works (simple view)</h3>
-
-  <p><b>1. Key generation</b><br>
-  Your browser creates a private key (secret) and a public key (shareable). The private key never leaves your device.</p>
-
-  <p><b>2. Key exchange</b><br>
-  When you paste someone else’s public key, both sides combine secrets to create a shared “conversation key”.</p>
-
-  <p><b>3. Encryption</b><br>
-  Your message is turned into unreadable ciphertext using AES encryption. Without the shared key, it looks like random noise.</p>
-
-  <p><b>4. Authentication</b><br>
-  A built-in integrity check ensures the message was not modified or faked. If tampered, decryption fails.</p>
-
-  <p><b>5. Decryption</b><br>
-  Only someone with the matching shared key can restore the original message.</p>
-
-  <p class="small">
-  Note: This is a browser-based simulation for learning cryptography concepts. It is not intended for real-world secure communication.
-  </p>
+  <h3>🧭 How it works (quick guide)</h3>
+  <p>🔑 You create a private + public key pair</p>
+  <p>🤝 You exchange public keys with someone else</p>
+  <p>🔒 Both sides compute the same shared secret</p>
+  <p>✉️ Messages are encrypted so only that shared secret can read them</p>
+  <p>🛡️ Messages include authentication to detect tampering</p>
 </div>
 
+<!-- KEY GENERATION -->
 <div class="panel">
-  <h3>1. Key Generation</h3>
+  <h3>1️⃣ Key Generation 🔑</h3>
 
-  <button onclick="generateKeys()">Generate Key Pair</button>
+  <button onclick="generateKeys()">✨ Generate Key Pair</button>
 
-  <div class="small">Public Key (share)</div>
-  <div class="keybox">
-    <textarea id="pubKey" readonly></textarea>
-    <button class="iconbtn" onclick="copy('pubKey')">📋</button>
-  </div>
+  <div class="small">📢 Public Key (share this)</div>
+  <textarea id="pubKey" readonly></textarea>
 
-  <div class="small">Private Key</div>
+  <div class="small">🔐 Private Key (keep secret)</div>
   <div class="keybox">
     <input id="privKey" type="password" readonly />
     <button class="iconbtn" onclick="togglePriv()">👁️</button>
@@ -129,30 +111,35 @@ button:hover { background:#1d4ed8; }
   </div>
 </div>
 
+<!-- SHARED SECRET -->
 <div class="panel">
-  <h3>2. Peer Key + Shared Secret</h3>
+  <h3>2️⃣ Shared Secret 🤝</h3>
 
-  <textarea id="peerKey" placeholder="Paste peer public key"></textarea>
-  <button onclick="derive()">Derive Shared Secret</button>
+  <textarea id="peerKey" placeholder="📥 Paste peer public key here"></textarea>
 
-  <pre id="status"></pre>
+  <button onclick="derive()">🔗 Create Shared Secret</button>
+
+  <pre id="status">⏳ Waiting for setup...</pre>
 </div>
 
+<!-- ENCRYPT / DECRYPT -->
 <div class="panel row">
+
   <div>
-    <h3>3. Encrypt</h3>
-    <textarea id="msg" placeholder="Message..."></textarea>
-    <button onclick="encrypt()">Encrypt</button>
+    <h3>3️⃣ Encrypt ✉️🔒</h3>
+    <textarea id="msg" placeholder="Type your secret message..."></textarea>
+    <button onclick="encrypt()">🚀 Encrypt</button>
     <button onclick="copy('cipherOut')">📋 Copy</button>
     <pre id="cipherOut"></pre>
   </div>
 
   <div>
-    <h3>4. Decrypt</h3>
-    <textarea id="cipherIn" placeholder="Paste payload JSON"></textarea>
-    <button onclick="decrypt()">Decrypt</button>
+    <h3>4️⃣ Decrypt 📩🔓</h3>
+    <textarea id="cipherIn" placeholder="Paste encrypted JSON here..."></textarea>
+    <button onclick="decrypt()">🧪 Decrypt</button>
     <pre id="plainOut"></pre>
   </div>
+
 </div>
 
 </div>
@@ -181,6 +168,9 @@ async function generateKeys(){
 
   document.getElementById("pubKey").value = b64(pub);
   document.getElementById("privKey").value = b64(priv);
+
+  document.getElementById("status").textContent =
+    "✅ Keys generated! Now share your public key 📢";
 }
 
 function togglePriv(){
@@ -189,45 +179,64 @@ function togglePriv(){
 }
 
 async function derive(){
-  const peer = document.getElementById("peerKey").value.trim();
+  try {
+    if(!kp){
+      document.getElementById("status").textContent =
+        "⚠️ Generate keys first 🔑";
+      return;
+    }
 
-  const peerKey = await crypto.subtle.importKey(
-    "spki",
-    unb64(peer),
-    { name:"ECDH", namedCurve:"P-256" },
-    true,
-    []
-  );
+    const peer = document.getElementById("peerKey").value.trim();
+    if(!peer){
+      document.getElementById("status").textContent =
+        "⚠️ Paste a peer public key 📥";
+      return;
+    }
 
-  sharedKey = await crypto.subtle.deriveKey(
-    { name:"ECDH", public: peerKey },
-    kp.privateKey,
-    { name:"AES-GCM", length:256 },
-    false,
-    ["encrypt","decrypt"]
-  );
+    const peerKey = await crypto.subtle.importKey(
+      "spki",
+      unb64(peer),
+      { name:"ECDH", namedCurve:"P-256" },
+      true,
+      []
+    );
 
-  const raw = await crypto.subtle.exportKey("raw",
-    await crypto.subtle.deriveBits(
+    sharedKey = await crypto.subtle.deriveKey(
+      { name:"ECDH", public: peerKey },
+      kp.privateKey,
+      { name:"AES-GCM", length:256 },
+      false,
+      ["encrypt","decrypt"]
+    );
+
+    const rawBits = await crypto.subtle.deriveBits(
       { name:"ECDH", public: peerKey },
       kp.privateKey,
       256
-    )
-  );
+    );
 
-  hmacKey = await crypto.subtle.importKey(
-    "raw",
-    raw,
-    { name:"HMAC", hash:"SHA-256" },
-    false,
-    ["sign","verify"]
-  );
+    hmacKey = await crypto.subtle.importKey(
+      "raw",
+      rawBits,
+      { name:"HMAC", hash:"SHA-256" },
+      false,
+      ["sign","verify"]
+    );
 
-  document.getElementById("status").textContent =
-    "✔ Secure session established";
+    document.getElementById("status").textContent =
+      "🎉 Shared secret established successfully 🤝🔐";
+
+  } catch(err){
+    console.error(err);
+    document.getElementById("status").textContent =
+      "❌ Failed to create shared secret (check console 🧯)";
+  }
 }
 
 async function encrypt(){
+  if(!sharedKey || !hmacKey)
+    return alert("⚠️ No shared secret yet!");
+
   const iv = crypto.getRandomValues(new Uint8Array(12));
   const data = new TextEncoder().encode(document.getElementById("msg").value);
 
@@ -283,11 +292,11 @@ async function decrypt(){
     );
 
     document.getElementById("plainOut").textContent =
-      new TextDecoder().decode(plain);
+      "✅ " + new TextDecoder().decode(plain);
 
   } catch(e){
     document.getElementById("plainOut").textContent =
-      "❌ Authentication failed or invalid message";
+      "❌ Message failed authentication or is corrupted 🧨";
   }
 }
 
