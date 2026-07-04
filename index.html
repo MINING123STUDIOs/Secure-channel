@@ -219,7 +219,7 @@ async function generateKeys(){
   kp = await crypto.subtle.generateKey(
     { name:"ECDH", namedCurve:"P-256" },
     true,
-    ["deriveKey"]
+    ["deriveKey", "deriveBits"]   // was just ["deriveKey"]
   );
 
   const pub = await crypto.subtle.exportKey("spki", kp.publicKey);
