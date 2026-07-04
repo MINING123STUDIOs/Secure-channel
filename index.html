@@ -375,7 +375,12 @@ No information is transmitted anywhere.
 
 <script src="https://cdn.jsdelivr.net/npm/libsodium-wrappers-sumo@0.7.15/dist/modules/libsodium-wrappers-sumo.js"></script>
 
-<script type="module" src="app.js"></script>
+<script type="module">
+    import * as crypto from "./crypto.js";
+    import "./app.js";
 
+    window.cryptoAPI = crypto;
+</script>
+    
 </body>
   </html> 
