@@ -246,48 +246,59 @@ async function derive(){
     }
 
     let peer = document.getElementById("peerKey").value.trim();
-
     if(!peer){
       document.getElementById("status").textContent =
         "⚠️ Paste a peer public key";
       return;
     }
 
-    // CLEAN INPUT (IMPORTANT FIX)
     peer = peer.replace(/\s+/g, "");
-
-    let peerBytes;
-    try {
-      peerBytes = unb64(peer);
-    } catch(e){
-      throw new Error("Peer key is not valid base64");
-    }
 
     const peerKey = await crypto.subtle.importKey(
       "spki",
-      peerBytes,
+      unb64(peer),
       { name:"ECDH", namedCurve:"P-256" },
       true,
       []
     );
 
-    sharedKey = await crypto.subtle.deriveKey(
-      { name:"ECDH", public: peerKey },
-      kp.privateKey,
-      { name:"AES-GCM", length:256 },
-      false,
-      ["encrypt","decrypt"]
-    );
-
-    const rawBits = await crypto.subtle.deriveBits(
+    // 1️⃣ RAW SHARED SECRET (ONLY ONCE)
+    const sharedSecret = await crypto.subtle.deriveBits(
       { name:"ECDH", public: peerKey },
       kp.privateKey,
       256
     );
 
-    hmacKey = await crypto.subtle.importKey(
+    // 2️⃣ EXPAND INTO KEYS USING HKDF (CORRECT APPROACH)
+    const hkdfKey = await crypto.subtle.importKey(
       "raw",
-      rawBits,
+      sharedSecret,
+      "HKDF",
+      false,
+      ["deriveKey", "deriveBits"]
+    );
+
+    sharedKey = await crypto.subtle.deriveKey(
+      {
+        name: "HKDF",
+        salt: new Uint8Array(16),
+        info: new TextEncoder().encode("aes-key"),
+        hash: "SHA-256"
+      },
+      hkdfKey,
+      { name:"AES-GCM", length:256 },
+      false,
+      ["encrypt","decrypt"]
+    );
+
+    hmacKey = await crypto.subtle.deriveKey(
+      {
+        name: "HKDF",
+        salt: new Uint8Array(16),
+        info: new TextEncoder().encode("hmac-key"),
+        hash: "SHA-256"
+      },
+      hkdfKey,
       { name:"HMAC", hash:"SHA-256" },
       false,
       ["sign","verify"]
@@ -299,7 +310,7 @@ async function derive(){
   } catch(err){
     console.error("DERIVE ERROR:", err);
     document.getElementById("status").textContent =
-      "❌ Failed to derive shared secret (check console 🧯)";
+      "❌ Failed to derive shared secret (see console)";
   }
 }
 
