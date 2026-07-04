@@ -101,7 +101,10 @@ button:hover { background:#1d4ed8; }
   <button onclick="generateKeys()">✨ Generate Key Pair</button>
 
   <div class="small">📢 Public Key (share this)</div>
-  <textarea id="pubKey" readonly></textarea>
+  <div class="keybox">
+    <textarea id="pubKey" readonly></textarea>
+    <button class="iconbtn" onclick="copy('pubKey')">📋</button>
+  </div>
 
   <div class="small">🔐 Private Key (keep secret)</div>
   <div class="keybox">
