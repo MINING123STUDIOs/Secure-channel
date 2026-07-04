@@ -1,14 +1,4 @@
-import {
-    generateDHKXKeyPair,
-    deriveSharedSecret,
-    encryptMessage,
-    decryptMessage,
-    generateSigningKeyPair,
-    signMessage,
-    verifySignature,
-    hashSHA256,
-    randomBytes
-} from "./crypto.js";
+const cryptoAPI = window.cryptoAPI;
 
 /**
  * -----------------------------
@@ -29,11 +19,6 @@ function setupTabs() {
     });
 }
 
-/**
- * -----------------------------
- * HELPERS
- * -----------------------------
- */
 function $(id) {
     return document.getElementById(id);
 }
@@ -44,12 +29,12 @@ function setText(id, value) {
 
 /**
  * -----------------------------
- * KEY GENERATION (ECDH / X25519)
+ * KEY GEN
  * -----------------------------
  */
 async function setupKeyGen() {
     $("generateKeys").onclick = async () => {
-        const kp = await generateDHKXKeyPair();
+        const kp = await cryptoAPI.generateDHKXKeyPair();
 
         setText("publicKey", kp.publicKey);
         setText("privateKey", kp.privateKey);
@@ -63,11 +48,11 @@ async function setupKeyGen() {
  */
 async function setupExchange() {
     $("deriveSecret").onclick = async () => {
-        const priv = $("exchangePrivate").value;
-        const pub = $("exchangePublic").value;
-
         try {
-            const secret = await deriveSharedSecret(priv, pub);
+            const priv = $("exchangePrivate").value.trim();
+            const pub = $("exchangePublic").value.trim();
+
+            const secret = await cryptoAPI.deriveSharedSecret(priv, pub);
             setText("sharedSecret", secret);
         } catch (e) {
             setText("sharedSecret", "ERROR: " + e.message);
@@ -82,11 +67,11 @@ async function setupExchange() {
  */
 async function setupEncrypt() {
     $("encryptButton").onclick = async () => {
-        const key = $("aesEncryptKey").value;
-        const text = $("plaintext").value;
-
         try {
-            const result = await encryptMessage(key, text);
+            const key = $("aesEncryptKey").value.trim();
+            const text = $("plaintext").value;
+
+            const result = await cryptoAPI.encryptMessage(key, text);
 
             setText("ivOutput", result.iv);
             setText("ciphertext", result.ciphertext);
@@ -103,12 +88,12 @@ async function setupEncrypt() {
  */
 async function setupDecrypt() {
     $("decryptButton").onclick = async () => {
-        const key = $("aesDecryptKey").value;
-        const iv = $("decryptIV").value;
-        const ct = $("decryptCiphertext").value;
-
         try {
-            const result = await decryptMessage(key, iv, ct);
+            const key = $("aesDecryptKey").value.trim();
+            const iv = $("decryptIV").value.trim();
+            const ct = $("decryptCiphertext").value.trim();
+
+            const result = await cryptoAPI.decryptMessage(key, iv, ct);
             setText("decryptedText", result);
         } catch (e) {
             setText("decryptedText", "ERROR: " + e.message);
@@ -125,7 +110,7 @@ let signingKeyPair = null;
 
 async function setupSigning() {
     $("generateSignKeys").onclick = async () => {
-        signingKeyPair = await generateSigningKeyPair();
+        signingKeyPair = await cryptoAPI.generateSigningKeyPair();
         alert("Signing keys generated (stored in memory for this session).");
     };
 
@@ -136,7 +121,11 @@ async function setupSigning() {
         }
 
         const msg = $("signMessage").value;
-        const sig = await signMessage(signingKeyPair.privateKey, msg);
+
+        const sig = await cryptoAPI.signMessage(
+            signingKeyPair.privateKey,
+            msg
+        );
 
         setText("signature", sig);
     };
@@ -150,28 +139,33 @@ async function setupSigning() {
 async function setupVerify() {
     $("verifyButton").onclick = async () => {
         if (!signingKeyPair) {
-            $("verifyResult").innerText = "No public key available (generate signing keys first).";
+            $("verifyResult").innerText =
+                "No keypair loaded (generate signing keys first).";
             return;
         }
 
         const msg = $("verifyMessage").value;
         const sig = $("verifySignature").value;
 
-        const ok = await verifySignature(
-            signingKeyPair.publicKey,
-            msg,
-            sig
-        );
+        try {
+            const ok = await cryptoAPI.verifySignature(
+                signingKeyPair.publicKey,
+                msg,
+                sig
+            );
 
-        $("verifyResult").innerText = ok
-            ? "✔ Signature valid"
-            : "✖ Signature invalid";
+            $("verifyResult").innerText = ok
+                ? "✔ Signature valid"
+                : "✖ Signature invalid";
+        } catch (e) {
+            $("verifyResult").innerText = "ERROR: " + e.message;
+        }
     };
 }
 
 /**
  * -----------------------------
- * HASHING
+ * HASH
  * -----------------------------
  */
 async function setupHash() {
@@ -180,11 +174,11 @@ async function setupHash() {
         const input = $("hashInput").value;
 
         if (algo !== "SHA-256") {
-            $("hashOutput").value = "Only SHA-256 wired in demo (libsodium limitation).";
+            $("hashOutput").value = "Only SHA-256 implemented in this demo.";
             return;
         }
 
-        const hash = await hashSHA256(input);
+        const hash = await cryptoAPI.hashSHA256(input);
         $("hashOutput").value = hash;
     };
 }
@@ -197,8 +191,13 @@ async function setupHash() {
 async function setupRandom() {
     $("randomButton").onclick = async () => {
         const n = parseInt($("randomLength").value, 10);
-        const out = await randomBytes(n);
-        $("randomOutput").value = out;
+
+        try {
+            const out = await cryptoAPI.randomBytes(n);
+            $("randomOutput").value = out;
+        } catch (e) {
+            $("randomOutput").value = "ERROR: " + e.message;
+        }
     };
 }
 
@@ -210,14 +209,14 @@ async function setupRandom() {
 window.addEventListener("load", async () => {
     setupTabs();
 
-    await setupKeyGen();
-    await setupExchange();
-    await setupEncrypt();
-    await setupDecrypt();
-    await setupSigning();
-    await setupVerify();
-    await setupHash();
-    await setupRandom();
+    setupKeyGen();
+    setupExchange();
+    setupEncrypt();
+    setupDecrypt();
+    setupSigning();
+    setupVerify();
+    setupHash();
+    setupRandom();
 
-    console.log("Secure Channel Assistant ready 🔐");
+    console.log("🔐 Secure Channel Assistant ready");
 }); 
