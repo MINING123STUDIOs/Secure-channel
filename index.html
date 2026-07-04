@@ -19,22 +19,22 @@ body {
   padding: 16px;
   display: grid;
   gap: 12px;
+  overflow-x: hidden;
 }
 
-/* Static UI typography stays readable */
 h1, h2, h3 {
   font-family: system-ui, Arial;
 }
 
-/* Panels */
 .panel {
   background: #111827;
   padding: 14px;
   border-radius: 12px;
   border: 1px solid #1f2937;
+  overflow: hidden;
 }
 
-/* ALL dynamic / data-heavy elements become monospace */
+/* GLOBAL DATA FIELDS */
 textarea,
 input,
 pre {
@@ -42,7 +42,7 @@ pre {
   max-width: 100%;
   box-sizing: border-box;
 
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
 
   background: #0b1220;
   color: #e5e7eb;
@@ -54,33 +54,40 @@ pre {
   word-break: break-word;
 }
 
-/* Prevent textarea overflow from long crypto strings */
 textarea {
   min-height: 90px;
   resize: vertical;
 }
 
-/* Layout grid */
+/* ROW LAYOUT */
 .row {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 12px;
 }
 
-/* Key container MUST not expand layout */
+/* KEY BOX FIXED STRUCTURE */
 .keybox {
   display: flex;
   gap: 8px;
   align-items: center;
+  width: 100%;
 }
 
-/* Critical fix: allow flex children to shrink properly */
-.keybox textarea,
-.keybox input {
+.keyfield {
+  flex: 1;
   min-width: 0;
+  overflow: hidden;
 }
 
-/* Buttons */
+.keyfield textarea,
+.keyfield input {
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+
+/* BUTTONS */
 button {
   margin-top: 8px;
   padding: 10px;
@@ -95,21 +102,19 @@ button:hover {
   background: #1d4ed8;
 }
 
-/* Small helper text stays readable (not monospace) */
 .small {
   font-size: 12px;
   color: #94a3b8;
   font-family: system-ui, Arial;
 }
 
-/* Icon buttons */
 .iconbtn {
   background: #1f2937;
   padding: 8px 10px;
   border-radius: 8px;
 }
 
-/* Mobile responsiveness */
+/* MOBILE */
 @media (max-width: 800px) {
   .row {
     grid-template-columns: 1fr;
@@ -119,34 +124,40 @@ button:hover {
 </head>
 
 <body>
+
 <div class="container">
 
-<h1>🔐 Secure Channel Assistant v3 ⚡</h1>
+<h1>🔐 Secure Channel Assistant ⚡</h1>
 
+<!-- INFO PANEL -->
 <div class="panel">
-  <h3>🧭 How it works (quick guide)</h3>
-  <p>🔑 You create a private + public key pair</p>
-  <p>🤝 You exchange public keys with someone else</p>
-  <p>🔒 Both sides compute the same shared secret</p>
-  <p>✉️ Messages are encrypted so only that shared secret can read them</p>
-  <p>🛡️ Messages include authentication to detect tampering</p>
+  <h3>🧭 How it works</h3>
+  <p>🔑 Generate a key pair (private stays on your device)</p>
+  <p>🤝 Exchange public keys with another user</p>
+  <p>🔒 Both sides derive a shared secret</p>
+  <p>✉️ Messages are encrypted with AES-GCM</p>
+  <p>🛡️ Messages include authentication (tamper detection)</p>
 </div>
 
-<!-- KEY GENERATION -->
+<!-- KEYS -->
 <div class="panel">
   <h3>1️⃣ Key Generation 🔑</h3>
 
   <button onclick="generateKeys()">✨ Generate Key Pair</button>
 
-  <div class="small">📢 Public Key (share this)</div>
+  <div class="small">📢 Public Key</div>
   <div class="keybox">
-    <textarea id="pubKey" readonly></textarea>
+    <div class="keyfield">
+      <textarea id="pubKey" readonly></textarea>
+    </div>
     <button class="iconbtn" onclick="copy('pubKey')">📋</button>
   </div>
 
-  <div class="small">🔐 Private Key (keep secret)</div>
+  <div class="small">🔐 Private Key</div>
   <div class="keybox">
-    <input id="privKey" type="password" readonly />
+    <div class="keyfield">
+      <input id="privKey" type="password" readonly />
+    </div>
     <button class="iconbtn" onclick="togglePriv()">👁️</button>
     <button class="iconbtn" onclick="copy('privKey')">📋</button>
   </div>
@@ -156,19 +167,19 @@ button:hover {
 <div class="panel">
   <h3>2️⃣ Shared Secret 🤝</h3>
 
-  <textarea id="peerKey" placeholder="📥 Paste peer public key here"></textarea>
+  <textarea id="peerKey" placeholder="📥 Paste peer public key"></textarea>
 
   <button onclick="derive()">🔗 Create Shared Secret</button>
 
   <pre id="status">⏳ Waiting for setup...</pre>
 </div>
 
-<!-- ENCRYPT / DECRYPT -->
+<!-- CRYPTO -->
 <div class="panel row">
 
   <div>
     <h3>3️⃣ Encrypt ✉️🔒</h3>
-    <textarea id="msg" placeholder="Type your secret message..."></textarea>
+    <textarea id="msg" placeholder="Type message..."></textarea>
     <button onclick="encrypt()">🚀 Encrypt</button>
     <button onclick="copy('cipherOut')">📋 Copy</button>
     <pre id="cipherOut"></pre>
@@ -176,7 +187,7 @@ button:hover {
 
   <div>
     <h3>4️⃣ Decrypt 📩🔓</h3>
-    <textarea id="cipherIn" placeholder="Paste encrypted JSON here..."></textarea>
+    <textarea id="cipherIn" placeholder="Paste encrypted JSON"></textarea>
     <button onclick="decrypt()">🧪 Decrypt</button>
     <pre id="plainOut"></pre>
   </div>
@@ -193,6 +204,7 @@ let hmacKey;
 function b64(buf){
   return btoa(String.fromCharCode(...new Uint8Array(buf)));
 }
+
 function unb64(b){
   return Uint8Array.from(atob(b), c => c.charCodeAt(0));
 }
@@ -211,7 +223,7 @@ async function generateKeys(){
   document.getElementById("privKey").value = b64(priv);
 
   document.getElementById("status").textContent =
-    "✅ Keys generated! Now share your public key 📢";
+    "✅ Keys generated successfully";
 }
 
 function togglePriv(){
@@ -223,14 +235,14 @@ async function derive(){
   try {
     if(!kp){
       document.getElementById("status").textContent =
-        "⚠️ Generate keys first 🔑";
+        "⚠️ Generate keys first";
       return;
     }
 
     const peer = document.getElementById("peerKey").value.trim();
     if(!peer){
       document.getElementById("status").textContent =
-        "⚠️ Paste a peer public key 📥";
+        "⚠️ Paste peer public key";
       return;
     }
 
@@ -265,21 +277,23 @@ async function derive(){
     );
 
     document.getElementById("status").textContent =
-      "🎉 Shared secret established successfully 🤝🔐";
+      "🎉 Shared secret established";
 
   } catch(err){
     console.error(err);
     document.getElementById("status").textContent =
-      "❌ Failed to create shared secret (check console 🧯)";
+      "❌ Failed to derive shared secret";
   }
 }
 
 async function encrypt(){
   if(!sharedKey || !hmacKey)
-    return alert("⚠️ No shared secret yet!");
+    return alert("⚠️ No shared secret");
 
   const iv = crypto.getRandomValues(new Uint8Array(12));
-  const data = new TextEncoder().encode(document.getElementById("msg").value);
+  const data = new TextEncoder().encode(
+    document.getElementById("msg").value
+  );
 
   const cipher = await crypto.subtle.encrypt(
     { name:"AES-GCM", iv },
@@ -309,7 +323,9 @@ async function encrypt(){
 
 async function decrypt(){
   try {
-    const p = JSON.parse(document.getElementById("cipherIn").value);
+    const p = JSON.parse(
+      document.getElementById("cipherIn").value
+    );
 
     const iv = unb64(p.iv);
     const data = unb64(p.data);
@@ -337,7 +353,7 @@ async function decrypt(){
 
   } catch(e){
     document.getElementById("plainOut").textContent =
-      "❌ Message failed authentication or is corrupted 🧨";
+      "❌ Authentication failed or corrupted message";
   }
 }
 
@@ -348,4 +364,4 @@ function copy(id){
 </script>
 
 </body>
-</html>
+</html> 
