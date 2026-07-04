@@ -53,7 +53,13 @@ pre {
   overflow-wrap: anywhere;
   word-break: break-word;
 }
-
+  
+pre {
+  white-space: pre-wrap;   /* key fix */
+  word-break: break-word;  /* safety fallback */
+  overflow-wrap: anywhere; /* modern fallback */
+}
+  
 textarea {
   min-height: 90px;
   resize: vertical;
