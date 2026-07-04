@@ -6,92 +6,114 @@
 <title>🔐 Secure Channel Assistant v3</title>
 
 <style>
-textarea, input {
-  width: 100%;
-  max-width: 100%;
-  box-sizing: border-box;
-}
-
-.keybox textarea,
-.keybox input {
-  min-width: 0;
-  overflow-wrap: anywhere;
-  word-break: break-all;
-}
-.keybox textarea {
-  max-height: 120px;
-  overflow-y: auto;
-}
 body {
-  margin:0;
+  margin: 0;
   font-family: system-ui, Arial;
-  background:#0b1220;
-  color:#e5e7eb;
+  background: #0b1220;
+  color: #e5e7eb;
 }
 
 .container {
-  max-width:1100px;
-  margin:auto;
-  padding:16px;
-  display:grid;
-  gap:12px;
+  max-width: 1100px;
+  margin: auto;
+  padding: 16px;
+  display: grid;
+  gap: 12px;
 }
 
-h1 { font-size:18px; margin:8px 0; }
+/* Static UI typography stays readable */
+h1, h2, h3 {
+  font-family: system-ui, Arial;
+}
 
+/* Panels */
 .panel {
-  background:#111827;
-  padding:14px;
-  border-radius:12px;
-  border:1px solid #1f2937;
+  background: #111827;
+  padding: 14px;
+  border-radius: 12px;
+  border: 1px solid #1f2937;
 }
 
-textarea, pre, input {
-  width:100%;
-  box-sizing:border-box;
-  background:#0b1220;
-  color:#e5e7eb;
-  border:1px solid #334155;
-  border-radius:8px;
-  padding:10px;
+/* ALL dynamic / data-heavy elements become monospace */
+textarea,
+input,
+pre {
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
+
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+
+  background: #0b1220;
+  color: #e5e7eb;
+  border: 1px solid #334155;
+  border-radius: 8px;
+  padding: 10px;
+
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
-textarea { min-height:90px; }
+/* Prevent textarea overflow from long crypto strings */
+textarea {
+  min-height: 90px;
+  resize: vertical;
+}
 
+/* Layout grid */
 .row {
-  display:grid;
+  display: grid;
   grid-template-columns: 1fr 1fr;
-  gap:12px;
+  gap: 12px;
 }
 
-button {
-  margin-top:8px;
-  padding:10px;
-  border-radius:8px;
-  border:none;
-  background:#2563eb;
-  color:white;
-  cursor:pointer;
-}
-
-button:hover { background:#1d4ed8; }
-
-.small { font-size:12px; color:#94a3b8; }
-
+/* Key container MUST not expand layout */
 .keybox {
-  display:flex;
-  gap:8px;
-  align-items:center;
+  display: flex;
+  gap: 8px;
+  align-items: center;
 }
 
+/* Critical fix: allow flex children to shrink properly */
+.keybox textarea,
+.keybox input {
+  min-width: 0;
+}
+
+/* Buttons */
+button {
+  margin-top: 8px;
+  padding: 10px;
+  border-radius: 8px;
+  border: none;
+  background: #2563eb;
+  color: white;
+  cursor: pointer;
+}
+
+button:hover {
+  background: #1d4ed8;
+}
+
+/* Small helper text stays readable (not monospace) */
+.small {
+  font-size: 12px;
+  color: #94a3b8;
+  font-family: system-ui, Arial;
+}
+
+/* Icon buttons */
 .iconbtn {
-  background:#1f2937;
-  padding:8px 10px;
-  border-radius:8px;
+  background: #1f2937;
+  padding: 8px 10px;
+  border-radius: 8px;
 }
 
+/* Mobile responsiveness */
 @media (max-width: 800px) {
-  .row { grid-template-columns: 1fr; }
+  .row {
+    grid-template-columns: 1fr;
+  }
 }
 </style>
 </head>
