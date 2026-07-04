@@ -2,157 +2,259 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8" />
-<title>Secure Channel Assistant (ECDH + AES-GCM)</title>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>Secure Ratchet Channel Demo</title>
+
 <style>
-body { font-family: Arial, sans-serif; background:#0f172a; color:#e2e8f0; padding:20px; }
-.container { max-width: 1000px; margin:auto; }
-h1 { font-size: 20px; }
-.panel { background:#111827; padding:15px; margin:10px 0; border-radius:10px; }
-textarea, input {
-  width:100%; padding:10px; margin-top:5px;
-  background:#0b1220; color:#e2e8f0; border:1px solid #334155;
-  border-radius:8px;
+body {
+  font-family: system-ui;
+  background:#0b1220;
+  color:#e5e7eb;
+  margin:0;
+  padding:16px;
 }
+
+.container { max-width:1100px; margin:auto; }
+
+.panel {
+  background:#111827;
+  border:1px solid #1f2937;
+  border-radius:12px;
+  padding:12px;
+  margin-bottom:12px;
+}
+
+.row { display:flex; gap:12px; flex-wrap:wrap; }
+
+.col { flex:1; min-width:300px; }
+
+textarea {
+  width:100%;
+  background:#0b1220;
+  border:1px solid #334155;
+  border-radius:10px;
+  color:#e5e7eb;
+  padding:10px;
+  box-sizing:border-box;
+}
+
 button {
-  margin-top:10px; padding:10px;
-  background:#2563eb; border:none; color:white;
-  border-radius:8px; cursor:pointer;
+  background:#2563eb;
+  color:white;
+  border:none;
+  padding:8px 10px;
+  border-radius:8px;
+  margin-top:6px;
+  cursor:pointer;
 }
+
 button:hover { background:#1d4ed8; }
-.row { display:flex; gap:10px; }
-.col { flex:1; }
+
+pre {
+  background:#0b1220;
+  padding:10px;
+  border-radius:10px;
+  border:1px solid #1f2937;
+  white-space:pre-wrap;
+  word-break:break-word;
+}
+
 small { color:#94a3b8; }
-pre { white-space: pre-wrap; word-break: break-word; }
 </style>
 </head>
+
 <body>
 <div class="container">
-<h1>🔐 Secure Channel Assistant (ECDH + AES-GCM Demo)</h1>
+
+<h2>🔐 Secure Ratchet Channel (ECDH + HKDF + AES-GCM)</h2>
 
 <div class="panel">
-  <h3>1. Key Generation (Local)</h3>
-  <button onclick="generateKeys()">Generate Key Pair</button>
-  <pre id="keys"></pre>
+  <h3>1. Identity Key Pair</h3>
+  <button onclick="genIdentity()">Generate Identity Keys</button>
+  <pre id="idOut"></pre>
 </div>
 
 <div class="panel">
-  <h3>2. Shared Secret Derivation</h3>
-  <p><small>Paste peer public key (base64):</small></p>
-  <textarea id="peerKey"></textarea>
-  <button onclick="deriveSecret()">Derive Shared Key</button>
-  <pre id="secretOut"></pre>
+  <h3>2. Session Setup (ECDH)</h3>
+  <small>Paste peer public identity key</small>
+  <textarea id="peerId"></textarea>
+  <button onclick="deriveSession()">Create Session</button>
+  <pre id="sessionOut"></pre>
 </div>
 
 <div class="panel row">
-  <div class="col">
-    <h3>3. Encrypt Message</h3>
-    <textarea id="plain" placeholder="Type message..."></textarea>
-    <button onclick="encryptMsg()">Encrypt</button>
-    <pre id="cipherOut"></pre>
-  </div>
 
-  <div class="col">
-    <h3>4. Decrypt Message</h3>
-    <textarea id="cipher" placeholder="Paste ciphertext JSON..."></textarea>
-    <button onclick="decryptMsg()">Decrypt</button>
-    <pre id="plainOut"></pre>
-  </div>
+<div class="col">
+<h3>📤 Send (Ratchet Encrypt)</h3>
+<textarea id="msgIn"></textarea>
+<button onclick="sendMsg()">Encrypt Message</button>
+<pre id="outCipher"></pre>
+</div>
+
+<div class="col">
+<h3>📥 Receive</h3>
+<textarea id="msgInCipher"></textarea>
+<button onclick="recvMsg()">Decrypt Message</button>
+<pre id="outPlain"></pre>
+</div>
+
 </div>
 
 </div>
 
 <script>
-let keyPair;
-let sharedKey;
+let identityKey;
+let peerKey;
+let sharedSecret;
 
-function bufToB64(buf) {
+// symmetric ratchet state
+let chainKey = null;
+let sendCounter = 0;
+let recvCounter = 0;
+
+function b64(buf) {
   return btoa(String.fromCharCode(...new Uint8Array(buf)));
 }
-function b64ToBuf(b64) {
-  return Uint8Array.from(atob(b64), c => c.charCodeAt(0));
+function unb64(str) {
+  return Uint8Array.from(atob(str), c => c.charCodeAt(0));
 }
 
-async function generateKeys() {
-  keyPair = await crypto.subtle.generateKey(
-    { name: "ECDH", namedCurve: "P-256" },
-    true,
-    ["deriveKey"]
-  );
-
-  const pub = await crypto.subtle.exportKey("spki", keyPair.publicKey);
-
-  document.getElementById("keys").textContent =
-    "Public Key (share this):\n" + bufToB64(pub);
-}
-
-async function deriveSecret() {
-  const peerB64 = document.getElementById("peerKey").value.trim();
-  const peerBuf = b64ToBuf(peerB64);
-
-  const peerKey = await crypto.subtle.importKey(
-    "spki",
-    peerBuf,
-    { name: "ECDH", namedCurve: "P-256" },
-    true,
-    []
-  );
-
-  sharedKey = await crypto.subtle.deriveKey(
-    { name: "ECDH", public: peerKey },
-    keyPair.privateKey,
+async function hkdf(keyMaterial, salt, info) {
+  return crypto.subtle.deriveKey(
+    {
+      name: "HKDF",
+      salt,
+      info,
+      hash: "SHA-256"
+    },
+    keyMaterial,
     { name: "AES-GCM", length: 256 },
     false,
     ["encrypt", "decrypt"]
   );
-
-  document.getElementById("secretOut").textContent =
-    "✔ Shared AES-GCM key established.";
 }
 
-async function encryptMsg() {
-  if (!sharedKey) return alert("No shared key yet.");
+async function genIdentity() {
+  identityKey = await crypto.subtle.generateKey(
+    { name:"ECDH", namedCurve:"P-256" },
+    true,
+    ["deriveKey"]
+  );
 
+  const pub = await crypto.subtle.exportKey("spki", identityKey.publicKey);
+
+  document.getElementById("idOut").textContent =
+    "Identity Public Key:\n" + b64(pub);
+}
+
+async function deriveSession() {
+  const peerBuf = unb64(document.getElementById("peerId").value.trim());
+
+  peerKey = await crypto.subtle.importKey(
+    "spki",
+    peerBuf,
+    { name:"ECDH", namedCurve:"P-256" },
+    true,
+    []
+  );
+
+  sharedSecret = await crypto.subtle.deriveBits(
+    { name:"ECDH", public: peerKey },
+    identityKey.privateKey,
+    256
+  );
+
+  const rawKey = await crypto.subtle.importKey(
+    "raw",
+    sharedSecret,
+    "HKDF",
+    false,
+    ["deriveKey"]
+  );
+
+  const salt = crypto.getRandomValues(new Uint8Array(16));
+
+  chainKey = await hkdf(rawKey, salt, new TextEncoder().encode("session-init"));
+
+  document.getElementById("sessionOut").textContent =
+    "✔ Session established. Ratchet initialized.";
+}
+
+async function ratchetKey(counter) {
+  const info = new TextEncoder().encode("msg-" + counter);
+
+  const keyMaterial = await crypto.subtle.exportKey("raw", chainKey);
+
+  const baseKey = await crypto.subtle.importKey(
+    "raw",
+    keyMaterial,
+    "HKDF",
+    false,
+    ["deriveKey"]
+  );
+
+  return hkdf(
+    baseKey,
+    new Uint8Array(16),
+    info
+  );
+}
+
+async function sendMsg() {
+  if (!chainKey) return alert("No session");
+
+  const msg = new TextEncoder().encode(document.getElementById("msgIn").value);
+
+  const key = await ratchetKey(sendCounter++);
   const iv = crypto.getRandomValues(new Uint8Array(12));
-  const text = new TextEncoder().encode(document.getElementById("plain").value);
 
   const ct = await crypto.subtle.encrypt(
-    { name: "AES-GCM", iv },
-    sharedKey,
-    text
+    { name:"AES-GCM", iv },
+    key,
+    msg
   );
 
   const payload = {
-    iv: bufToB64(iv),
-    data: bufToB64(ct)
+    c: sendCounter,
+    iv: b64(iv),
+    d: b64(ct)
   };
 
-  document.getElementById("cipherOut").textContent =
+  document.getElementById("outCipher").textContent =
     JSON.stringify(payload, null, 2);
 }
 
-async function decryptMsg() {
-  if (!sharedKey) return alert("No shared key yet.");
+async function recvMsg() {
+  if (!chainKey) return alert("No session");
 
   try {
-    const payload = JSON.parse(document.getElementById("cipher").value);
+    const payload = JSON.parse(document.getElementById("msgInCipher").value);
 
-    const iv = b64ToBuf(payload.iv);
-    const data = b64ToBuf(payload.data);
+    if (payload.c <= recvCounter) {
+      throw new Error("Replay detected");
+    }
+
+    recvCounter = payload.c;
+
+    const key = await ratchetKey(payload.c);
+    const iv = unb64(payload.iv);
+    const data = unb64(payload.d);
 
     const pt = await crypto.subtle.decrypt(
-      { name: "AES-GCM", iv },
-      sharedKey,
+      { name:"AES-GCM", iv },
+      key,
       data
     );
 
-    document.getElementById("plainOut").textContent =
+    document.getElementById("outPlain").textContent =
       new TextDecoder().decode(pt);
 
   } catch (e) {
-    document.getElementById("plainOut").textContent =
-      "❌ Decryption failed (tampered or wrong key)";
+    document.getElementById("outPlain").textContent =
+      "❌ Failed: " + e.message;
   }
 }
 </script>
+
 </body>
 </html> 
