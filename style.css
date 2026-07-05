@@ -1,0 +1,275 @@
+/*
+ * Secure Channel Assistant — end-to-end encrypted messaging demo with a
+ * Double Ratchet (Signal-style) key exchange.
+ * Copyright (C) 2026 MINING123STUDIOS
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program. If not, see <https://www.gnu.org/licenses/>.
+ */
+
+:root {
+  --bg: #0b1220;
+  --panel-bg: #111827;
+  --border: #1f2937;
+  --text: #e5e7eb;
+  --muted: #94a3b8;
+  --accent: #2563eb;
+  --accent-hover: #1d4ed8;
+  --input-bg: #0b1220;
+  --input-border: #334155;
+  --danger: #f87171;
+  --success: #34d399;
+  --warning: #fbbf24;
+  --iconbtn-bg: #1f2937;
+  --iconbtn-hover: #29354a;
+  --fingerprint-bg: #0f172a;
+  /* Dark mode's default link blue reads muddy against this background,
+     so links get their own brighter variable instead of reusing --accent. */
+  --link: #60a5fa;
+  --link-hover: #93c5fd;
+}
+
+[data-theme="light"] {
+  --bg: #f3f4f6;
+  --panel-bg: #ffffff;
+  --border: #e2e8f0;
+  --text: #0f172a;
+  --muted: #55606e;
+  /* Slightly brighter than a plain #2563eb while staying >4.5:1 contrast
+     with the white button text (WCAG AA for normal-size text). */
+  --accent: #2e6bec;
+  --accent-hover: #2563eb;
+  --input-bg: #f8fafc;
+  --input-border: #cbd5e1;
+  /* Brighter red than the original #b91c1c; still ~4.8:1 contrast on
+     white, so it stays accessible while looking less heavy. */
+  --danger: #dc2626;
+  --success: #047857;
+  --warning: #b45309;
+  --iconbtn-bg: #e2e8f0;
+  --iconbtn-hover: #cbd5e1;
+  --fingerprint-bg: #eef2f7;
+  --link: #2563eb;
+  --link-hover: #1d4ed8;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  font-family: system-ui, Arial;
+  background: var(--bg);
+  color: var(--text);
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+a {
+  color: var(--link);
+  text-decoration: underline;
+}
+a:hover {
+  color: var(--link-hover);
+}
+a:visited {
+  color: var(--link);
+}
+
+.container {
+  max-width: 1100px;
+  margin: auto;
+  padding: 16px;
+  display: grid;
+  gap: 14px;
+  overflow-x: hidden;
+}
+
+h1, h2, h3 {
+  font-family: system-ui, Arial;
+  margin: 0;
+}
+
+.topbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+h1 {
+  font-size: 1.6rem;
+  line-height: 1.3;
+}
+
+.panel {
+  background: var(--panel-bg);
+  padding: 16px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  overflow: hidden;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.panel h3 {
+  margin-bottom: 12px;
+}
+
+/* GLOBAL DATA FIELDS */
+textarea,
+input,
+pre {
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
+
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+
+  background: var(--input-bg);
+  color: var(--text);
+  border: 1px solid var(--input-border);
+  border-radius: 8px;
+  padding: 10px;
+
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+pre {
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+  max-height: 260px;
+  overflow-y: auto;
+}
+
+textarea {
+  min-height: 90px;
+  resize: vertical;
+}
+
+/* Consistent vertical rhythm: every label+field pair lives in a .field
+   block, textbox on its own line, buttons in a .btnrow underneath —
+   used uniformly across ALL panels now (Key Generation and Shared
+   Secret used to lay the textbox and buttons out side-by-side via
+   .keybox; that's been dropped in favor of this single pattern). */
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 14px 0;
+}
+.field:first-child { margin-top: 0; }
+.field:last-child { margin-bottom: 0; }
+
+.panel > button,
+.panel > .btnrow {
+  margin: 10px 0 18px;
+}
+.panel > button:first-child {
+  margin-top: 0;
+}
+
+/* ROW LAYOUT */
+.row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+/* BUTTONS */
+button {
+  padding: 10px 14px;
+  border-radius: 8px;
+  border: none;
+  background: var(--accent);
+  color: white;
+  cursor: pointer;
+  font-size: 0.95rem;
+}
+
+button:hover {
+  background: var(--accent-hover);
+}
+
+button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.small {
+  font-size: 12px;
+  color: var(--muted);
+  font-family: system-ui, Arial;
+}
+
+.iconbtn {
+  background: var(--iconbtn-bg);
+  color: var(--text);
+  padding: 8px 10px;
+  border-radius: 8px;
+  font-size: 0.9rem;
+}
+.iconbtn:hover {
+  background: var(--iconbtn-hover);
+}
+
+.btnrow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.danger-btn {
+  background: transparent;
+  border: 1px solid var(--danger);
+  color: var(--danger);
+}
+.danger-btn:hover {
+  background: var(--danger);
+  color: white;
+}
+
+.fingerprint {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 12px;
+  background: var(--fingerprint-bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px 10px;
+  color: var(--text);
+  letter-spacing: 0.5px;
+  word-break: break-all;
+}
+
+.badge {
+  display: inline-block;
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--iconbtn-bg);
+  color: var(--muted);
+  margin-left: 6px;
+}
+
+footer {
+  text-align: center;
+  color: var(--muted);
+  font-size: 12px;
+  padding: 8px 0 20px;
+}
+
+/* MOBILE */
+@media (max-width: 800px) {
+  .row {
+    grid-template-columns: 1fr;
+  }
+}
