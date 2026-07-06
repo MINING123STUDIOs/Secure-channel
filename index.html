@@ -31,6 +31,7 @@
 
 <div class="topbar">
   <h1>🔐 <b>S</b>ecure <br>🔑 <b>C</b>hannel <br>⚡ <b>A</b>ssistant</h1>
+  <p class="small">Privacy-focused Encryption Tool</p>
   <button class="iconbtn" id="themeToggleBtn" onclick="toggleTheme()" title="Toggle light/dark mode">🌙 Dark</button>
 </div>
 
@@ -38,21 +39,21 @@
 <div class="panel">
   <h3>🧭 How it works</h3>
 
-  <p><b>1 Generate your keys.</b> This creates a 🔓 <b>public key</b> you can share freely, and a 🔐 <b>private key</b> that must stay on this device.</p>
-  <p><b>2 Share only your public key.</b> Send it to your contact over any channel — email, chat, anything. It's safe even if someone else sees it.</p>
-  <p><b>🚫 Never share your private key — with anyone, ever.</b> Not your contact, not "support," not a website asking you to "verify" it. Anyone who has it can read your messages and pretend to be you.</p>
-  <p><b>3 Paste their public key</b> and create the shared secret. Both of you do this once, using each other's public key.</p>
-  <p><b>4 Encrypt, send, decrypt.</b> Type a message (or import any file — text, image, whatever), encrypt it, and copy the result to your contact through any channel you like. They paste it into Decrypt to read it.</p>
+  <p><b>1. Generate your keys.</b> This creates a 🔓 <b>public key</b> you can share freely, and a 🔐 <b>private key</b> that must stay on this device.</p>
+  <p><b>2. Share only your public key.</b> Send it to your contact over any channel like email, chat, anything. It's safe even if someone else sees it.</p>
+  <p><b>🚫 Never share your private key with anyone, ever.</b> Not your contact, not "support," not a website asking you to "verify" it. Anyone who has it can read your messages and pretend to be you.</p>
+  <p><b>3. Paste their public key</b> and create the shared secret. Both of you do this once, using each other's public key.</p>
+  <p><b>4. Encrypt, send, decrypt.</b> Type a message (or import any file, for example text, image, whatever), encrypt it, and copy the result to your contact through any channel you like. They paste it into Decrypt to read it.</p>
 
-  <p class="small">📨 <b>This tool does <b>NOT</b> send anything for you</b> — it only locks and unlocks messages. You copy the encrypted text to your contact yourself.</p>
-  <p class="small">🔁 Every message uses a fresh key, and the two of you re-key on every reply — so even if one message's key were ever exposed, it wouldn't expose past <i>or</i> future messages. See the notes in the Shared Secret panel for details.</p>
-  <p class="small">⚠️ <b>Refreshing or closing this page erases everything</b> — your keys, your session, all of it. There's no account and no cloud backup. Use <b>Export Identity</b> below <i>before</i> you refresh if you want to pick this conversation back up later. Once you've generated keys, your browser will also ask you to confirm before leaving the page, as a safety net.</p>
-  <p class="small">🔍 <b>Fingerprints</b> let you verify you're really talking to the right person (and not someone in the middle). Read the Session Fingerprint aloud to your contact over a trusted channel (a phone call, in person) — if it matches on both screens, your connection is genuine.</p>
+  <p class="small">📨 <b>This tool does <b>NOT</b> send anything for you!</b> It only locks and unlocks messages. You copy the encrypted text to your contact yourself.</p>
+  <p class="small">🔁 Every message uses a fresh key, and the two of you re-key on every reply so even if one message's key were ever exposed, it wouldn't expose past <i>or</i> future messages. See the notes in the Shared Secret panel for details.</p>
+  <p class="small">⚠️ <b>Refreshing or closing this page erases everything</b> including your keys, your session, all of it. There's no account and no cloud backup. Use <b>Export Identity</b> below <i>before</i> you refresh if you want to pick this conversation back up later. Once you've generated keys, your browser will also ask you to confirm before leaving the page, as a safety net.</p>
+  <p class="small">🔍 <b>Fingerprints</b> let you verify you're really talking to the right person (and not someone in the middle). Read the Session Fingerprint aloud to your contact over a trusted channel (a phone call, in person). If it matches on both screens, your connection is genuine.</p>
 </div>
 
 <!-- KEYS -->
 <div class="panel">
-  <h3>1 Key Generation 🔑</h3>
+  <h3>1. Key Generation 🔑</h3>
 
   <div class="btnrow">
     <button onclick="generateKeys()">✨ Generate Key Pair</button>
@@ -61,7 +62,7 @@
   </div>
 
   <div class="field">
-    <div class="small">📢 Public Key — safe to share</div>
+    <div class="small">📢 Public Key (safe to share)</div>
     <textarea id="pubKey" readonly></textarea>
     <div class="btnrow">
       <button class="iconbtn" onclick="copyBox('pubKey')" title="Copy">📋 Copy</button>
@@ -72,7 +73,7 @@
   </div>
 
   <div class="field">
-    <div class="small">🔐 Private Key — 🚫 never share this</div>
+    <div class="small">🔐 Private Key (🚫 never share this)</div>
     <input id="privKey" type="password" readonly />
     <div class="btnrow">
       <button class="iconbtn" onclick="togglePriv()" title="Show/hide"><span class="eye-icon" id="eyeIcon">👁️</span> <span id="toggleLabel">Show</span></button>
@@ -84,7 +85,7 @@
 
 <!-- SHARED SECRET -->
 <div class="panel">
-  <h3>2 Shared Secret 🤝</h3>
+  <h3>2. Shared Secret 🤝</h3>
 
   <div class="field">
     <div class="small">📥 Peer's public key</div>
@@ -110,14 +111,14 @@
     <div class="fingerprint" id="sessionFingerprint">—</div>
   </div>
 
-  <p class="small">📝 <b>How the forward security works:</b> every reply performs a fresh Diffie-Hellman exchange (a real "double ratchet," the same design used by Signal), and every individual message advances a one-way hash chain on top of that. In a normal back-and-forth conversation this means a fresh ECDH computation on effectively every message. A single leaked message key never exposes any other message, and if your device were ever compromised, the very next exchange re-secures the conversation going forward.</p>
+  <p class="small">📝 <b>How the forward security works:</b> every reply performs a fresh Diffie-Hellman exchange (a real double ratchet, the same design used by Signal), and every individual message advances a one-way hash chain on top of that. In a normal back-and-forth conversation this means a fresh ECDH computation on effectively every message. A single leaked message key never exposes any other message, and if your device were ever compromised, the very next exchange re-secures the conversation going forward.</p>
 </div>
 
 <!-- CRYPTO -->
 <div class="panel row">
 
   <div>
-    <h3>3 Encrypt ✉️🔒</h3>
+    <h3>3. Encrypt ✉️🔒</h3>
     <div class="field">
       <textarea id="msg" placeholder="Type a message, or import any file below (text, image, anything)..."></textarea>
       <div class="btnrow">
@@ -138,7 +139,7 @@
   </div>
 
   <div>
-    <h3>4 Decrypt 📩🔓</h3>
+    <h3>4. Decrypt 📩🔓</h3>
     <div class="field">
       <textarea id="cipherIn" placeholder="Paste encrypted JSON"></textarea>
       <div class="btnrow">
