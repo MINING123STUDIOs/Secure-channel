@@ -38,11 +38,11 @@
 <div class="panel">
   <h3>🧭 How it works</h3>
 
-  <p><b>1️⃣ Generate your keys.</b> This creates a 🔓 <b>public key</b> you can share freely, and a 🔐 <b>private key</b> that must stay on this device.</p>
-  <p><b>2️⃣ Share only your public key.</b> Send it to your contact over any channel — email, chat, anything. It's safe even if someone else sees it.</p>
+  <p><b>1 Generate your keys.</b> This creates a 🔓 <b>public key</b> you can share freely, and a 🔐 <b>private key</b> that must stay on this device.</p>
+  <p><b>2 Share only your public key.</b> Send it to your contact over any channel — email, chat, anything. It's safe even if someone else sees it.</p>
   <p><b>🚫 Never share your private key — with anyone, ever.</b> Not your contact, not "support," not a website asking you to "verify" it. Anyone who has it can read your messages and pretend to be you.</p>
-  <p><b>3️⃣ Paste their public key</b> and create the shared secret. Both of you do this once, using each other's public key.</p>
-  <p><b>4️⃣ Encrypt, send, decrypt.</b> Type a message (or import any file — text, image, whatever), encrypt it, and copy the result to your contact through any channel you like. They paste it into Decrypt to read it.</p>
+  <p><b>3 Paste their public key</b> and create the shared secret. Both of you do this once, using each other's public key.</p>
+  <p><b>4 Encrypt, send, decrypt.</b> Type a message (or import any file — text, image, whatever), encrypt it, and copy the result to your contact through any channel you like. They paste it into Decrypt to read it.</p>
 
   <p class="small">📨 <b>This tool does <b>NOT</b> send anything for you</b> — it only locks and unlocks messages. You copy the encrypted text to your contact yourself.</p>
   <p class="small">🔁 Every message uses a fresh key, and the two of you re-key on every reply — so even if one message's key were ever exposed, it wouldn't expose past <i>or</i> future messages. See the notes in the Shared Secret panel for details.</p>
@@ -52,7 +52,7 @@
 
 <!-- KEYS -->
 <div class="panel">
-  <h3>1️⃣ Key Generation 🔑</h3>
+  <h3>1 Key Generation 🔑</h3>
 
   <div class="btnrow">
     <button onclick="generateKeys()">✨ Generate Key Pair</button>
@@ -84,7 +84,7 @@
 
 <!-- SHARED SECRET -->
 <div class="panel">
-  <h3>2️⃣ Shared Secret 🤝</h3>
+  <h3>2 Shared Secret 🤝</h3>
 
   <div class="field">
     <div class="small">📥 Peer's public key</div>
@@ -117,7 +117,7 @@
 <div class="panel row">
 
   <div>
-    <h3>3️⃣ Encrypt ✉️🔒</h3>
+    <h3>3 Encrypt ✉️🔒</h3>
     <div class="field">
       <textarea id="msg" placeholder="Type a message, or import any file below (text, image, anything)..."></textarea>
       <div class="btnrow">
@@ -138,7 +138,7 @@
   </div>
 
   <div>
-    <h3>4️⃣ Decrypt 📩🔓</h3>
+    <h3>4 Decrypt 📩🔓</h3>
     <div class="field">
       <textarea id="cipherIn" placeholder="Paste encrypted JSON"></textarea>
       <div class="btnrow">
