@@ -250,6 +250,31 @@ button:disabled {
   word-break: break-all;
 }
 
+/* Eye icon on the private-key Show/Hide button: a diagonal line is
+   overlaid via ::after when the key is currently visible, so the icon
+   itself communicates "click to hide" rather than relying on the
+   label text alone. */
+.eye-icon {
+  position: relative;
+  display: inline-block;
+}
+.eye-icon::after {
+  content: '';
+  position: absolute;
+  left: -2px;
+  right: -2px;
+  top: 50%;
+  height: 2px;
+  background: currentColor;
+  transform: translateY(-50%) rotate(-45deg);
+  transform-origin: center;
+  opacity: 0;
+  transition: opacity 0.1s ease;
+}
+.eye-icon.crossed::after {
+  opacity: 1;
+}
+
 .badge {
   display: inline-block;
   font-size: 11px;
