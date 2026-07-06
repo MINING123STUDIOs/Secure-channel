@@ -21,7 +21,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
-<title>🔐 Secure Channel Assistant v4</title>
+<title>Secure Channel Assistant v4</title>
 <link rel="stylesheet" href="style.css">
 </head>
 
@@ -36,11 +36,11 @@
 
 <!-- INFO PANEL -->
 <div class="panel">
-  <h3>🧭 How it works</h3>
+  <h3>How it works</h3>
 
-  <p><b>1 Generate your keys.</b> This creates a 🔓 <b>public key</b> you can share freely, and a 🔐 <b>private key</b> that must stay on this device.</p>
+  <p><b>1 Generate your keys.</b> This creates a <b>public key</b> you can share freely, and a <b>private key</b> that must stay on this device.</p>
   <p><b>2 Share only your public key.</b> Send it to your contact over any channel — email, chat, anything. It's safe even if someone else sees it.</p>
-  <p><b>🚫 Never share your private key — with anyone, ever.</b> Not your contact, not "support," not a website asking you to "verify" it. Anyone who has it can read your messages and pretend to be you.</p>
+  <p><b>🚫 Never share your private key with anyone, ever.</b> Not your contact, not "support," not a website asking you to "verify" it. Anyone who has it can read your messages and pretend to be you.</p>
   <p><b>3 Paste their public key</b> and create the shared secret. Both of you do this once, using each other's public key.</p>
   <p><b>4 Encrypt, send, decrypt.</b> Type a message (or import any file — text, image, whatever), encrypt it, and copy the result to your contact through any channel you like. They paste it into Decrypt to read it.</p>
 
@@ -52,16 +52,16 @@
 
 <!-- KEYS -->
 <div class="panel">
-  <h3>1 Key Generation 🔑</h3>
+  <h3>1 Key Generation</h3>
 
   <div class="btnrow">
-    <button onclick="generateKeys()">✨ Generate Key Pair</button>
+    <button onclick="generateKeys()">Generate Key Pair</button>
     <button class="iconbtn" onclick="exportIdentity()">⬇️ Export Identity (backup)</button>
     <button class="iconbtn" onclick="importIdentity()">⬆️ Import Identity (restore)</button>
   </div>
 
   <div class="field">
-    <div class="small">📢 Public Key — safe to share</div>
+    <div class="small">Public Key (safe to share)</div>
     <textarea id="pubKey" readonly></textarea>
     <div class="btnrow">
       <button class="iconbtn" onclick="copyBox('pubKey')" title="Copy">📋 Copy</button>
@@ -72,7 +72,7 @@
   </div>
 
   <div class="field">
-    <div class="small">🔐 Private Key — 🚫 never share this</div>
+    <div class="small">Private Key (🚫 never share this)</div>
     <input id="privKey" type="password" readonly />
     <div class="btnrow">
       <button class="iconbtn" onclick="togglePriv()" title="Show/hide"><span class="eye-icon" id="eyeIcon">👁️</span> <span id="toggleLabel">Show</span></button>
@@ -84,10 +84,10 @@
 
 <!-- SHARED SECRET -->
 <div class="panel">
-  <h3>2 Shared Secret 🤝</h3>
+  <h3>2 Shared Secret</h3>
 
   <div class="field">
-    <div class="small">📥 Peer's public key</div>
+    <div class="small">Peer's public key</div>
     <textarea id="peerKey" placeholder="Paste peer public key"></textarea>
     <div class="btnrow">
       <button class="iconbtn" onclick="copyBox('peerKey')" title="Copy">📋 Copy</button>
@@ -99,25 +99,25 @@
   </div>
 
   <div class="btnrow">
-    <button onclick="derive()">🔗 Create Shared Secret</button>
-    <button class="danger-btn" onclick="resetSessionUI()">🔄 Reset Session</button>
+    <button onclick="derive()">Create Shared Secret</button>
+    <button class="danger-btn" onclick="resetSessionUI()"Reset Session</button>
   </div>
 
   <pre id="status">⏳ Waiting for setup...</pre>
 
   <div class="field" id="sessionFingerprintField" style="display:none;">
-    <div class="small">🔍 Session Fingerprint — read this aloud to your contact to confirm you're both connected to each other, not an impostor:</div>
+    <div class="small">Session Fingerprint — read this aloud to your contact to confirm you're both connected to each other, not an impostor:</div>
     <div class="fingerprint" id="sessionFingerprint">—</div>
   </div>
 
-  <p class="small">📝 <b>How the forward security works:</b> every reply performs a fresh Diffie-Hellman exchange (a real "double ratchet," the same design used by Signal), and every individual message advances a one-way hash chain on top of that. In a normal back-and-forth conversation this means a fresh ECDH computation on effectively every message. A single leaked message key never exposes any other message, and if your device were ever compromised, the very next exchange re-secures the conversation going forward.</p>
+  <p class="small"><b>How the forward security works:</b> every reply performs a fresh Diffie-Hellman exchange (a real "double ratchet," the same design used by Signal), and every individual message advances a one-way hash chain on top of that. In a normal back-and-forth conversation this means a fresh ECDH computation on effectively every message. A single leaked message key never exposes any other message, and if your device were ever compromised, the very next exchange re-secures the conversation going forward.</p>
 </div>
 
 <!-- CRYPTO -->
 <div class="panel row">
 
   <div>
-    <h3>3 Encrypt ✉️🔒</h3>
+    <h3>3 Encrypt</h3>
     <div class="field">
       <textarea id="msg" placeholder="Type a message, or import any file below (text, image, anything)..."></textarea>
       <div class="btnrow">
@@ -126,7 +126,7 @@
         <button class="iconbtn" onclick="importMsgBox()" title="Import any file">⬆️ Import file</button>
       </div>
     </div>
-    <button onclick="doEncrypt()">🚀 Encrypt</button>
+    <button onclick="doEncrypt()"Encrypt</button>
     <div class="field">
       <pre id="cipherOut"></pre>
       <div class="btnrow">
@@ -138,7 +138,7 @@
   </div>
 
   <div>
-    <h3>4 Decrypt 📩🔓</h3>
+    <h3>4 Decrypt</h3>
     <div class="field">
       <textarea id="cipherIn" placeholder="Paste encrypted JSON"></textarea>
       <div class="btnrow">
@@ -147,7 +147,7 @@
         <button class="iconbtn" onclick="importIntoTextarea('cipherIn')" title="Import">⬆️ Import</button>
       </div>
     </div>
-    <button onclick="doDecrypt()">🧪 Decrypt</button>
+    <button onclick="doDecrypt()"Decrypt</button>
     <div class="field">
       <pre id="plainOut"></pre>
       <div class="btnrow">
