@@ -4,7 +4,7 @@ This project is a zero-dependency, client-side, security-sensitive tool.
 Those three properties are the source of almost every rule below: there's
 no build step to catch mistakes for you, no server to patch after the
 fact, and a bug in the crypto path is a confidentiality bug, not a
-cosmetic one. Read this before touching `script.js`.
+cosmetic one. Read this before touching anything under `js/`.
 
 ---
 
@@ -45,17 +45,21 @@ without an explicit, deliberate decision (and a note in `docs.md`):
   what's currently a few dozen functions; it adds ceremony without adding
   clarity at this size.
 - **Section comment banners** (`/* ---------- X ---------- */`) mark the
-  regions of `script.js` (byte helpers, low-level crypto, ratchet, large-
-  payload helpers, UI). Put new code in the right section, or add a new
-  banner if it's genuinely a new concern — don't bury unrelated logic
-  inside an existing section.
+  regions within each file under `js/` (e.g. byte helpers and the envelope
+  mask within `constants.js`, or low-level crypto vs. the ratchet class
+  within `crypto-core.js`). Put new code in the right file and the right
+  section within it, or add a new banner if it's genuinely a new concern —
+  don't bury unrelated logic inside an existing section, and don't add a
+  fifth top-level file without a clear reason (see §6 in `docs.md` for
+  what belongs where and in what load order).
 - **Constants at the top, not inline.** Any new size threshold, timeout,
   or limit belongs next to `CHUNK_BYTES` / `DISPLAY_THRESHOLD` /
   `SPINNER_THRESHOLD` etc., with a one-line comment explaining what
   crosses it and why. Never hardcode a magic number for one of these deep
   in a function.
 - **Explain the *why*, not the *what*, in comments.** The existing style
-  (see the file-top comment block, or the note above `ENVELOPE_MASK`)
+  (see the file-top comment block in `constants.js`, or the note above
+  `ENVELOPE_SEED`)
   explains the reasoning a future reader can't infer from the code alone
   — an engine limit, a security property, a bug that was caught and fixed.
   Keep doing that; don't add comments that just restate the line below
@@ -90,10 +94,16 @@ gets extra scrutiny. Specifically:
   operate on the *whole packet* rather than re-deriving `header` — they
   never touch the object that's fed into `JSON.stringify` for AAD purposes.
 - **Never conflate the obfuscation layer with encryption.** `maskBytes` /
-  `ENVELOPE_MASK` (see `docs.md` §3) is cosmetic camouflage, not a secret
-  and not a security boundary. Don't let a future change start treating it
+  `ENVELOPE_SEED` (see `docs.md` §3) is cosmetic camouflage, not a secret
+  and not a security boundary — the keystream construction was strengthened
+  for better avalanche/diffusion characteristics (no more short repeating
+  XOR period), but that's still about not looking recognizable, not about
+  resisting a real adversary. Don't let a future change start treating it
   as one (e.g. "we could skip real encryption for X since it's masked
-  anyway" — no).
+  anyway" — no). Note `maskBytes` is `async` (it calls `crypto.subtle.digest`),
+  so every call site must `await` it — `encodeOpaquePacket`,
+  `decodeOpaquePacket`, and `buildLargeExportParts` are all `async` for
+  exactly this reason.
 - **Respect `MAX_SKIP` / `MAX_SKIPPED_KEYS`.** These bound how much work a
   malicious or buggy peer can force. If you add a new code path that walks
   the hash chain or caches message keys, it needs the same bounds.
@@ -159,10 +169,10 @@ clipboard permissions).
 
 ### 6.1 Automated tests — Node + a stubbed DOM
 
-`script.js` is a classic (non-module) script that references `document`,
-`window`, and `crypto.subtle` directly, so it can't be `require()`-d as-is.
-The recommended pattern (used to verify the changes in this project so
-far) is:
+Each file under `js/` is a classic (non-module) script that references
+`document`, `window`, and/or `crypto.subtle` directly, so none of them can
+be `require()`-d as-is. The recommended pattern (used to verify the
+changes in this project so far) is:
 
 1. Build a **minimal stub** for `document`/`window`/`navigator` — just
    enough that top-level side effects (the theme IIFE, the
@@ -171,18 +181,26 @@ far) is:
    `classList` with `add`/`remove`/`contains`, `appendChild`, and
    `addEventListener`.
 2. Use Node's **global `crypto.subtle`** (Node 19+) directly — it
-   implements the same algorithms (ECDH P-256, HKDF, HMAC, AES-GCM) the
-   browser does, so the real crypto code runs unmodified. Also provide
-   `btoa`/`atob`/`Blob`/`TextEncoder`/`TextDecoder`/`Buffer` in the sandbox.
-3. Run `script.js`'s source **concatenated with test code** through
-   `vm.runInContext()` as a single script (not two separate `vm.Script`
-   runs) — this matters because `script.js` uses top-level `let`/`const`/
-   `function`, which are scoped to that one evaluation. Concatenating
-   means the test code can call `RatchetSession`, `bytesToBase64Chunks`,
-   `encodeOpaquePacket`, etc. directly, exactly as if it were a second
-   `<script>` tag sharing the page's scope.
+   implements the same algorithms (ECDH P-256, HKDF, HMAC, AES-GCM,
+   SHA-256) the browser does, so the real crypto code runs unmodified.
+   Also provide `btoa`/`atob`/`Blob`/`TextEncoder`/`TextDecoder`/`Buffer`
+   in the sandbox.
+3. Run the four `js/` files **concatenated, in load order (`constants.js`,
+   `crypto-core.js`, `large-payload.js`, `ui.js`), together with test
+   code**, through `vm.runInContext()` as a single script (not separate
+   `vm.Script` runs per file) — this matters because each file uses
+   top-level `let`/`const`/`function`, which are scoped to that one
+   evaluation, the same way separate classic `<script>` tags in a real
+   page share one global lexical scope only when they execute in that
+   same order. Concatenating means the test code can call
+   `RatchetSession`, `bytesToBase64Chunks`, `encodeOpaquePacket`, etc.
+   directly, exactly as if it were a fifth `<script>` tag sharing the
+   page's scope.
 4. `crypto.getRandomValues()` caps at 65536 bytes per call in both the
    browser and Node — fill larger test buffers in a loop, not one call.
+5. `maskBytes`, `encodeOpaquePacket`, `decodeOpaquePacket`, and
+   `buildLargeExportParts` are all `async` (they call `crypto.subtle.digest`
+   internally) — remember to `await` them in test code, same as production.
 
 ### 6.2 Required automated coverage before merging a crypto/format change
 

@@ -48,7 +48,7 @@
   <p class="small">🔁 Every message uses a fresh key, and the two of you re-key on every reply so even if one message's key were ever exposed, it wouldn't expose past <i>or</i> future messages. See the notes in the Shared Secret panel for details.</p>
   <p class="small">⚠️ <b>Refreshing or closing this page erases everything</b> including your keys, your session, all of it. There's no account and no cloud backup. Use <b>Export Identity</b> below <i>before</i> you refresh if you want to pick this conversation back up later. Once you've generated keys, your browser will also ask you to confirm before leaving the page, as a safety net.</p>
   <p class="small">🔍 <b>Fingerprints</b> let you verify you're really talking to the right person (and not someone in the middle). Read the Session Fingerprint aloud to your contact over a trusted channel (a phone call, in person). If it matches on both screens, your connection is genuine.</p>
-  <p class="small">🔒 For best possible security it is recomended to download the source files to your device and run the tool offline after verifying the programm.</p>
+  <p class="small">🔒 For best possible security it is recommended to download the source files to your device and run the tool offline after verifying the program.</p>
 </div>
 
 <!-- KEYS -->
@@ -133,7 +133,6 @@
       <div class="btnrow">
         <button class="iconbtn" onclick="copyBox('cipherOut')" title="Copy">📋 Copy</button>
         <button class="iconbtn" onclick="exportTextBox('cipherOut','encrypted-message.bin')" title="Export">⬇️ Export</button>
-        <button class="iconbtn" onclick="importIntoPre('cipherOut')" title="Import">⬆️ Import</button>
       </div>
     </div>
   </div>
@@ -154,7 +153,6 @@
       <div class="btnrow">
         <button class="iconbtn" onclick="copyBox('plainOut')" title="Copy">📋 Copy</button>
         <button class="iconbtn" onclick="exportPlainOut()" title="Export (restores original file if applicable)">⬇️ Export</button>
-        <button class="iconbtn" onclick="importIntoPre('plainOut')" title="Import">⬆️ Import</button>
       </div>
     </div>
   </div>
@@ -165,6 +163,9 @@
 
 </div>
 
-<script src="script.js"></script>
+<script src="js/constants.js"></script>
+<script src="js/crypto-core.js"></script>
+<script src="js/large-payload.js"></script>
+<script src="js/ui.js"></script>
 </body>
 </html>
