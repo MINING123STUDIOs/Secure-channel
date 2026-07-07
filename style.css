@@ -265,7 +265,9 @@ button:disabled {
   right: -2px;
   top: 50%;
   height: 2px;
-  background: currentColor;
+  /* Red (var(--danger)) rather than currentColor, so the "key is
+     visible" state reads as a clear warning cue in both themes. */
+  background: var(--danger);
   transform: translateY(-50%) rotate(-45deg);
   transform-origin: center;
   opacity: 0;
@@ -290,6 +292,96 @@ footer {
   color: var(--muted);
   font-size: 12px;
   padding: 8px 0 20px;
+}
+
+/* ---------- Progress overlay (large-file operations) ----------
+   A single floating pill, created lazily by script.js, used for any
+   operation that touches a large payload (reading/encrypting/
+   decrypting/importing). Two visual modes:
+   - indeterminate: shown immediately, before we know how long the
+     job will take — a short accent arc spins quickly.
+   - determinate (.determinate): once real progress is available
+     (chunk N of M), the arc grows to reflect it, the spin slows to a
+     more stately pace, and a percentage label appears. */
+#progressOverlay {
+  position: fixed;
+  right: 18px;
+  bottom: 18px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: var(--panel-bg);
+  border: 1px solid var(--border);
+  padding: 9px 16px 9px 10px;
+  border-radius: 999px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.28);
+  opacity: 0;
+  transform: translateY(10px) scale(0.94);
+  pointer-events: none;
+  transition: opacity 0.25s cubic-bezier(0.22, 1, 0.36, 1),
+              transform 0.25s cubic-bezier(0.22, 1, 0.36, 1);
+  z-index: 999;
+  font-family: system-ui, Arial;
+}
+#progressOverlay.visible {
+  opacity: 1;
+  transform: translateY(0) scale(1);
+}
+
+.progress-ring {
+  --pct: 25;
+  position: relative;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: conic-gradient(var(--accent) calc(var(--pct) * 1%), transparent 0);
+  -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 3px), #000 calc(100% - 3px));
+          mask: radial-gradient(farthest-side, transparent calc(100% - 3px), #000 calc(100% - 3px));
+  filter: drop-shadow(0 0 4px color-mix(in srgb, var(--accent) 55%, transparent));
+  animation: progress-spin 0.9s cubic-bezier(0.6, 0, 0.4, 1) infinite;
+}
+.progress-ring.determinate {
+  /* Slower, linear sweep once the fill reflects real progress —
+     reads as "steady work happening" rather than "still figuring out
+     how long this will take". */
+  animation: progress-spin 2.4s linear infinite;
+  transition: background 0.2s ease;
+}
+.progress-ring::after {
+  content: '';
+  position: absolute;
+  inset: -4px;
+  border-radius: 50%;
+  background: radial-gradient(circle, color-mix(in srgb, var(--accent) 32%, transparent) 0%, transparent 72%);
+  animation: progress-pulse 1.8s ease-in-out infinite;
+}
+@keyframes progress-spin {
+  to { transform: rotate(360deg); }
+}
+@keyframes progress-pulse {
+  0%, 100% { opacity: 0.3; }
+  50% { opacity: 0.8; }
+}
+
+.progress-label {
+  font-size: 12.5px;
+  color: var(--text);
+  white-space: nowrap;
+}
+.progress-pct {
+  font-size: 11.5px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  min-width: 2.6em;
+  text-align: right;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .progress-ring,
+  .progress-ring::after {
+    animation: none;
+  }
 }
 
 /* MOBILE */

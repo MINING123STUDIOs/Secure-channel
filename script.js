@@ -80,8 +80,57 @@ const MAX_SKIPPED_KEYS = 2000;
 const CHUNK_BYTES = 64 * 1024 * 1024;              // 64MB raw per base64 chunk (~85MB base64, far under the ~512M char engine limit)
 const DISPLAY_THRESHOLD = 1 * 1024 * 1024;         // above this, show a summary in the UI instead of the full content
 const STREAMING_EXPORT_THRESHOLD = 200 * 1024 * 1024; // above this, Export bypasses JSON.stringify entirely
-const LARGE_FORMAT_MAGIC = "SECURE-CHANNEL-LARGE-V1";
+// A plain-looking token rather than a self-describing name — on import
+// this is only ever compared byte-for-byte, never displayed, so there's
+// no reason for it to spell out what the format is.
+const LARGE_FORMAT_MAGIC = "N2xkVA1Qy7ZpKf3H";
 const IMPORT_WINDOW = 32 * 1024 * 1024;            // read window size when streaming-importing a large file
+const SPINNER_THRESHOLD = 512 * 1024;              // above this, show the progress indicator for encrypt/decrypt/read/import
+
+// Yields to the browser between chunks of otherwise-synchronous work
+// (base64 encode/decode loops, file windows) so the tab keeps painting
+// — the progress indicator's animation and percentage — instead of
+// freezing for the whole operation on large files.
+function yieldToUI(){
+  return new Promise((resolve) => {
+    if(typeof requestAnimationFrame === "function") requestAnimationFrame(() => resolve());
+    else setTimeout(resolve, 0);
+  });
+}
+
+/* ---------- outer envelope obfuscation ----------
+   This does NOT add security — the real protection is the ECDH/AES-GCM
+   double ratchet above/below. All this does is stop the copy/pasted or
+   exported text from visually announcing itself as "an encrypted
+   messenger packet" (readable {"header":..., "dataChunks":...} JSON,
+   or a base64-of-JSON blob starting with the tell-tale "eyJ..." that
+   tools and onlookers recognize on sight). A fixed XOR mask breaks that
+   visual signature before base64-encoding, so the result reads as a
+   nondescript blob of base64 noise instead. Anyone who has this source
+   file can reverse it trivially — that's expected and fine, since it's
+   cosmetic camouflage, not a secret. */
+const ENVELOPE_MASK = new Uint8Array([0x5a, 0x3c, 0x91, 0xe7, 0x2d, 0x88, 0x14, 0x6b, 0xc2, 0x49, 0xf0, 0x77]);
+
+function maskBytes(bytes){
+  const out = new Uint8Array(bytes.length);
+  for(let i = 0; i < bytes.length; i++) out[i] = bytes[i] ^ ENVELOPE_MASK[i % ENVELOPE_MASK.length];
+  return out;
+}
+
+// packet -> opaque base64 blob (no braces, quotes, or field names visible)
+function encodeOpaquePacket(packet){
+  const json = JSON.stringify(packet);
+  const masked = maskBytes(new TextEncoder().encode(json));
+  return b64(masked);
+}
+
+// opaque base64 blob -> packet (throws if it isn't one of ours)
+function decodeOpaquePacket(str){
+  const cleaned = String(str).trim().replace(/\s+/g, "");
+  const masked = unb64(cleaned);       // throws on invalid base64 — caller already handles that
+  const json = new TextDecoder().decode(maskBytes(masked));
+  return JSON.parse(json);             // throws on malformed JSON — caller already handles that
+}
 
 /* ---------- byte helpers ---------- */
 
@@ -121,18 +170,30 @@ function concatBytes(...arrs){
 
 // Split raw bytes into base64 CHUNKS, each individually far under the
 // engine's max string length, instead of one monolithic base64 string.
-function bytesToBase64Chunks(bytes){
+// Async so it can yield between chunks — for very large files this
+// loop alone can take seconds, and without yielding the tab would
+// freeze (and any progress indicator would freeze right along with it).
+async function bytesToBase64Chunks(bytes, onProgress){
   const chunks = [];
+  const total = bytes.length || 1;
   for(let offset = 0; offset < bytes.length; offset += CHUNK_BYTES){
     chunks.push(b64(bytes.subarray(offset, offset + CHUNK_BYTES)));
+    if(onProgress) onProgress(Math.min(offset + CHUNK_BYTES, bytes.length) / total);
+    await yieldToUI();
   }
   if(chunks.length === 0) chunks.push("");
   return chunks;
 }
-function base64ChunksToBytes(chunks){
-  const decoded = chunks.map(c => unb64(c));
-  const total = decoded.reduce((s, c) => s + c.length, 0);
-  const out = new Uint8Array(total);
+async function base64ChunksToBytes(chunks, onProgress){
+  const decoded = [];
+  const total = chunks.length || 1;
+  for(let i = 0; i < chunks.length; i++){
+    decoded.push(unb64(chunks[i]));
+    if(onProgress) onProgress((i + 1) / total);
+    await yieldToUI();
+  }
+  const totalLen = decoded.reduce((s, c) => s + c.length, 0);
+  const out = new Uint8Array(totalLen);
   let offset = 0;
   for(const c of decoded){ out.set(c, offset); offset += c.length; }
   return out;
@@ -239,7 +300,7 @@ class RatchetSession {
   // extraHeaderFields (optional): merged into the header — e.g. file
   // metadata for attachments. It rides along as AEAD associated data,
   // so it's authenticated (tamper-evident) even though not encrypted.
-  async encrypt(plaintextBytes, extraHeaderFields){
+  async encrypt(plaintextBytes, extraHeaderFields, onProgress){
     if(!this.CKs) throw new Error("no sending chain established yet");
     const { mkSeed, nextCK } = await kdfCK(this.CKs);
     this.CKs = nextCK;
@@ -253,7 +314,7 @@ class RatchetSession {
     const aad = new TextEncoder().encode(JSON.stringify(header));
     const cipher = await crypto.subtle.encrypt({ name: "AES-GCM", iv, additionalData: aad }, aesKey, plaintextBytes);
 
-    const dataChunks = bytesToBase64Chunks(new Uint8Array(cipher));
+    const dataChunks = await bytesToBase64Chunks(new Uint8Array(cipher), onProgress);
     return { v: 3, header, iv: b64(iv), dataChunks };
   }
 
@@ -279,7 +340,7 @@ class RatchetSession {
   // or { cipherBytes: Uint8Array } (already reconstructed by the
   // streaming importer for a very large file) so both paths converge
   // on the same decryption logic below.
-  async decrypt(packet){
+  async decrypt(packet, onProgress){
     if(!packet || packet.v !== 3 || !packet.header) throw new Error("unrecognized packet format");
     const header = packet.header;
     if(typeof header.dh !== "string" || typeof header.n !== "number" || typeof header.pn !== "number"){
@@ -288,7 +349,7 @@ class RatchetSession {
     const dhRawIncoming = unb64(header.dh);
     const skipKey = header.dh + ":" + header.n;
     const iv = unb64(packet.iv);
-    const data = packet.cipherBytes ? packet.cipherBytes : base64ChunksToBytes(packet.dataChunks);
+    const data = packet.cipherBytes ? packet.cipherBytes : await base64ChunksToBytes(packet.dataChunks, onProgress);
     const aad = new TextEncoder().encode(JSON.stringify(header));
 
     // Case 1: key already cached from an earlier out-of-order skip.
@@ -397,7 +458,8 @@ async function sessionFingerprintOf(myPubRawLocal, peerPubRawLocal){
 function buildLargeExportParts(packet){
   const parts = [];
   parts.push(LARGE_FORMAT_MAGIC + "\n");
-  parts.push(JSON.stringify(packet.header) + "\n");
+  const headerBytes = new TextEncoder().encode(JSON.stringify(packet.header));
+  parts.push(b64(maskBytes(headerBytes)) + "\n");
   parts.push(packet.iv + "\n");
   parts.push(String(packet.dataChunks.length) + "\n");
   for(const c of packet.dataChunks){
@@ -410,7 +472,7 @@ function buildLargeExportParts(packet){
 // Reads a File/Blob in fixed windows via .slice()/.text() — never
 // calling .text() on the whole file — and reconstructs {header, iv,
 // cipherBytes}. Mirrors buildLargeExportParts()'s format exactly.
-async function streamingParseLargeFile(blob, windowSize){
+async function streamingParseLargeFile(blob, windowSize, onProgress){
   windowSize = windowSize || IMPORT_WINDOW;
   let offset = 0;
   let residual = "";
@@ -441,7 +503,8 @@ async function streamingParseLargeFile(blob, windowSize){
         if(line !== LARGE_FORMAT_MAGIC) throw new Error("not a recognized large-file export");
         state = "header";
       } else if(state === "header"){
-        headerObj = JSON.parse(line);
+        const headerBytes = maskBytes(unb64(line));
+        headerObj = JSON.parse(new TextDecoder().decode(headerBytes));
         state = "iv";
       } else if(state === "iv"){
         ivStr = line;
@@ -458,6 +521,9 @@ async function streamingParseLargeFile(blob, windowSize){
         }
       }
     }
+
+    if(onProgress) onProgress(Math.min(offset, blob.size) / (blob.size || 1));
+    await yieldToUI();
   }
 
   const total = chunkBytesList.reduce((s, c) => s + c.length, 0);
@@ -491,6 +557,63 @@ window.addEventListener('beforeunload', (e) => {
   e.preventDefault();
   e.returnValue = ''; // browsers show their own generic wording; the string itself isn't shown
 });
+
+/* ---------- UI: progress indicator ----------
+   One floating overlay, created lazily on first use, reused for any
+   large-payload step (reading a file, encrypting, decrypting, or
+   streaming-importing). Progress.show() puts it in a quick
+   "indeterminate" spin; once a step can report real progress,
+   Progress.update(fraction) switches it to a slower determinate sweep
+   with a percentage. Progress.hide() fades it out. */
+const Progress = (() => {
+  let el = null, ring = null, labelEl = null, pctEl = null, visible = false;
+
+  function ensure(){
+    if(el) return;
+    el = document.createElement('div');
+    el.id = 'progressOverlay';
+    el.setAttribute('role', 'status');
+    el.setAttribute('aria-live', 'polite');
+    const r = document.createElement('div');
+    r.className = 'progress-ring';
+    r.setAttribute('aria-hidden', 'true');
+    const l = document.createElement('span');
+    l.className = 'progress-label';
+    const p = document.createElement('span');
+    p.className = 'progress-pct';
+    el.appendChild(r); el.appendChild(l); el.appendChild(p);
+    document.body.appendChild(el);
+    ring = r; labelEl = l; pctEl = p;
+  }
+
+  function show(label){
+    ensure();
+    ring.classList.remove('determinate');
+    ring.style.setProperty('--pct', 25);
+    labelEl.textContent = label || 'Working…';
+    pctEl.textContent = '';
+    el.classList.add('visible');
+    visible = true;
+  }
+
+  function update(fraction, label){
+    if(!visible) ensure();
+    if(label !== undefined) labelEl.textContent = label;
+    ring.classList.add('determinate');
+    const pct = Math.max(0, Math.min(100, Math.round(fraction * 100)));
+    ring.style.setProperty('--pct', pct);
+    pctEl.textContent = pct + '%';
+    if(!visible){ el.classList.add('visible'); visible = true; }
+  }
+
+  function hide(){
+    if(!el) return;
+    el.classList.remove('visible');
+    visible = false;
+  }
+
+  return { show, update, hide };
+})();
 
 /* ---------- UI: status / small helpers ---------- */
 
@@ -550,7 +673,7 @@ function copyBox(id){
       alert("⚠️ This message is too large to copy to the clipboard. Use Export below to save it as a file instead.");
       return;
     }
-    navigator.clipboard.writeText(JSON.stringify(lastEncryptedPacket));
+    navigator.clipboard.writeText(encodeOpaquePacket(lastEncryptedPacket));
     return;
   }
   if(id === 'plainOut'){
@@ -577,9 +700,9 @@ function exportTextBox(id, filename, isSensitive){
     if(!lastEncryptedPacket){ alert("⚠️ Nothing here to export yet"); return; }
     if(estimateChunksByteLength(lastEncryptedPacket.dataChunks) > STREAMING_EXPORT_THRESHOLD){
       const parts = buildLargeExportParts(lastEncryptedPacket);
-      downloadBlob(new Blob(parts, { type: 'text/plain' }), filename.replace(/\.json$/, '.scl'));
+      downloadBlob(new Blob(parts, { type: 'application/octet-stream' }), filename.replace(/\.[^.]+$/, '.scl'));
     } else {
-      downloadBlob(new Blob([JSON.stringify(lastEncryptedPacket)], { type: 'application/json' }), filename);
+      downloadBlob(new Blob([encodeOpaquePacket(lastEncryptedPacket)], { type: 'application/octet-stream' }), filename);
     }
     return;
   }
@@ -597,22 +720,29 @@ async function importIntoTextarea(id){
   if(id === 'cipherIn'){
     pendingDecryptPacket = null;
     if(file.size > DISPLAY_THRESHOLD){
+      const showSpinner = file.size > SPINNER_THRESHOLD;
       try {
+        if(showSpinner) Progress.show('Reading file…');
         const magicPeek = await file.slice(0, LARGE_FORMAT_MAGIC.length + 1).text();
         if(magicPeek.startsWith(LARGE_FORMAT_MAGIC)){
-          pendingDecryptPacket = await streamingParseLargeFile(file);
+          pendingDecryptPacket = await streamingParseLargeFile(
+            file, undefined,
+            showSpinner ? (f) => Progress.update(f, 'Reading file…') : null
+          );
         } else if(file.size > STREAMING_EXPORT_THRESHOLD){
           document.getElementById('cipherIn').value =
             `⚠️ This file is ${formatBytes(file.size)} and isn't in this tool's streaming format — ` +
             `it may fail to load. If it came from this tool's Export, that's unexpected; otherwise it wasn't meant for direct import this large.`;
           return;
         } else {
-          pendingDecryptPacket = JSON.parse(await file.text());
+          pendingDecryptPacket = decodeOpaquePacket(await file.text());
         }
       } catch(e){
         console.error(e);
         document.getElementById('cipherIn').value = `❌ Couldn't read ${file.name} as an encrypted message (see console).`;
         return;
+      } finally {
+        if(showSpinner) Progress.hide();
       }
       document.getElementById('cipherIn').value =
         `📎 Imported: ${file.name} (${formatBytes(file.size)}) — click Decrypt to process it, or edit/paste here to replace it.`;
@@ -809,6 +939,11 @@ async function doEncrypt(){
 
   let plaintextBytes;
   let extraHeader;
+  const willBeLarge = pendingAttachment
+    ? pendingAttachment.size > SPINNER_THRESHOLD
+    : document.getElementById("msg").value.length > SPINNER_THRESHOLD;
+
+  if(willBeLarge) Progress.show('Reading file…');
 
   if(pendingAttachment){
     try {
@@ -816,12 +951,14 @@ async function doEncrypt(){
     } catch(e){
       console.error(e);
       outEl.textContent = "❌ Couldn't read the attached file (see console).";
+      if(willBeLarge) Progress.hide();
       return;
     }
     extraHeader = { file: { name: pendingAttachment.name, type: pendingAttachment.type } };
   } else {
     const msgText = document.getElementById("msg").value;
     if(!msgText){
+      if(willBeLarge) Progress.hide();
       outEl.textContent = "⚠️ Nothing to encrypt — type a message or import a file first";
       return;
     }
@@ -829,14 +966,18 @@ async function doEncrypt(){
   }
 
   try {
-    const packet = await session.encrypt(plaintextBytes, extraHeader);
+    if(willBeLarge) Progress.show('Encrypting…');
+    const packet = await session.encrypt(
+      plaintextBytes, extraHeader,
+      willBeLarge ? (f) => Progress.update(f, 'Encrypting…') : null
+    );
     lastEncryptedPacket = packet;
 
     if(plaintextBytes.length > DISPLAY_THRESHOLD){
       const approxCipherSize = estimateChunksByteLength(packet.dataChunks);
       outEl.textContent = `🔒 Encrypted — approx. ${formatBytes(approxCipherSize)}. Too large to display here. Use Export or Copy below.`;
     } else {
-      outEl.textContent = JSON.stringify(packet, null, 2);
+      outEl.textContent = encodeOpaquePacket(packet);
     }
   } catch(e){
     console.error(e);
@@ -845,6 +986,8 @@ async function doEncrypt(){
     } else {
       outEl.textContent = "❌ Encryption failed unexpectedly (see console).";
     }
+  } finally {
+    if(willBeLarge) Progress.hide();
   }
 }
 
@@ -858,15 +1001,24 @@ async function doDecrypt(){
   let packet = pendingDecryptPacket;
   if(!packet){
     try {
-      packet = JSON.parse(document.getElementById("cipherIn").value);
+      packet = decodeOpaquePacket(document.getElementById("cipherIn").value);
     } catch(e){
-      outEl.textContent = "❌ That doesn't look like valid JSON — check you copied the whole encrypted message.";
+      outEl.textContent = "❌ That doesn't look like a valid encrypted message — check you copied the whole thing.";
       return;
     }
   }
 
+  const approxSize = packet.cipherBytes
+    ? packet.cipherBytes.length
+    : estimateChunksByteLength(packet.dataChunks || []);
+  const willBeLarge = approxSize > SPINNER_THRESHOLD;
+
   try {
-    const plainBytes = await session.decrypt(packet);
+    if(willBeLarge) Progress.show('Decrypting…');
+    const plainBytes = await session.decrypt(
+      packet,
+      willBeLarge ? (f) => Progress.update(f, 'Decrypting…') : null
+    );
     const fileMeta = (packet.header && packet.header.file) ? packet.header.file : null;
     lastDecrypted = { bytes: plainBytes, fileMeta };
 
@@ -891,6 +1043,8 @@ async function doDecrypt(){
       msg += "it may be corrupted, tampered with, encrypted for someone else, or already read.";
     }
     outEl.textContent = msg;
+  } finally {
+    if(willBeLarge) Progress.hide();
   }
 }
 

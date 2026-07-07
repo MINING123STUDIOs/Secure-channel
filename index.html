@@ -131,7 +131,7 @@
       <pre id="cipherOut"></pre>
       <div class="btnrow">
         <button class="iconbtn" onclick="copyBox('cipherOut')" title="Copy">📋 Copy</button>
-        <button class="iconbtn" onclick="exportTextBox('cipherOut','encrypted-message.json')" title="Export">⬇️ Export</button>
+        <button class="iconbtn" onclick="exportTextBox('cipherOut','encrypted-message.bin')" title="Export">⬇️ Export</button>
         <button class="iconbtn" onclick="importIntoPre('cipherOut')" title="Import">⬆️ Import</button>
       </div>
     </div>
@@ -140,10 +140,10 @@
   <div>
     <h3>4. Decrypt 📩🔓</h3>
     <div class="field">
-      <textarea id="cipherIn" placeholder="Paste encrypted JSON"></textarea>
+      <textarea id="cipherIn" placeholder="Paste encrypted message"></textarea>
       <div class="btnrow">
         <button class="iconbtn" onclick="copyBox('cipherIn')" title="Copy">📋 Copy</button>
-        <button class="iconbtn" onclick="exportTextBox('cipherIn','encrypted-message.json')" title="Export">⬇️ Export</button>
+        <button class="iconbtn" onclick="exportTextBox('cipherIn','encrypted-message.bin')" title="Export">⬇️ Export</button>
         <button class="iconbtn" onclick="importIntoTextarea('cipherIn')" title="Import">⬆️ Import</button>
       </div>
     </div>
