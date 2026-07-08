@@ -112,7 +112,7 @@ function yieldToUI(){
    that tools and onlookers recognize on sight). See dev.md §3 before
    ever treating any part of this as a security boundary — it isn't one.
 
-   Two layers, applied in order by maskBytes() / reversed by unmaskBytes():
+   Two sub-layers, applied in order by maskBytesOnce():
 
    1. XOR against a pseudorandom keystream. This is what breaks the
       brace/quote signature. IMPORTANT — XOR has no diffusion: output
@@ -136,6 +136,25 @@ function yieldToUI(){
       left XOR-only (there's nothing after them to diffuse into, and
       it avoids padding the output to a word boundary).
 
+   That accumulator chain is also this sub-layer's limitation: it only
+   carries FORWARD, so within one maskBytesOnce() pass, a change near the
+   end of the buffer never affects bytes near the start. maskBytes() (the
+   function actually called by encodeOpaquePacket) fixes that by running
+   the above twice with reverseBitOrder() in between:
+
+     maskBytesOnce(tags A) -> reverseBitOrder -> maskBytesOnce(tags B) -> reverseBitOrder
+
+   reverseBitOrder() reverses the ENTIRE bit sequence of the buffer (byte
+   order flips too, not just the bits within each byte), so whatever was
+   near the end for pass 1 is near the start for pass 2. Running the mix
+   again there propagates changes in the other direction; the closing
+   reverseBitOrder() undoes the flip so the output has the original
+   orientation. unmaskBytes() runs all four steps in reverse (reverseBitOrder
+   is its own inverse, so "undoing" it is just calling it again). Pass 2
+   uses its own domain tags (MASK_STREAM_TAG_2 / ROUND_MATERIAL_TAG_2) so
+   it isn't the same keystream/round material re-applied to a permutation
+   of pass 1's own output.
+
    Keystream generation: rather than hashing every 32-byte block with
    SHA-256 (the previous approach), which would mean millions of async
    crypto.subtle.digest calls for this tool's largest supported exports
@@ -156,8 +175,16 @@ const ENVELOPE_SEED = new Uint8Array([
   0xc2, 0x49, 0xf0, 0x77, 0x8e, 0x03, 0xd5, 0xaa
 ]);
 
-const MASK_STREAM_TAG = 0x00;  // domain tag for the XOR keystream
-const ROUND_MATERIAL_TAG = 0x01; // domain tag for the ARX round constants/rotations
+
+const MASK_STREAM_TAG = 0x00;  // domain tag for pass 1's XOR keystream
+const ROUND_MATERIAL_TAG = 0x01; // domain tag for pass 1's ARX round constants/rotations
+const MASK_STREAM_TAG_2 = 0x02;  // domain tag for pass 2's XOR keystream (see maskBytes below)
+const ROUND_MATERIAL_TAG_2 = 0x03; // domain tag for pass 2's ARX round constants/rotations
+// Pass 2 gets its own tags rather than reusing pass 1's: reusing them would
+// mean pass 2 XORs/mixes with the exact same keystream and round material as
+// pass 1, just against bit-reversed input. Separate tags mean the two passes
+// are independent-looking layers, not the same layer applied to a permutation
+// of its own output.
 
 // One-time (per call) 32-bit seed for a named stream, derived from the
 // public ENVELOPE_SEED via a single SHA-256 call. Different tags produce
@@ -257,35 +284,111 @@ async function arxMixWords(bytes, roundMaterial, inverse){
   }
 }
 
-async function maskBytes(bytes){
-  const maskSeed = await envelopeDomainSeed(MASK_STREAM_TAG);
+// Precomputed byte-level bit-reversal table (bit 7 <-> bit 0, bit 6 <-> bit 1,
+// etc. within one byte), used by reverseBitOrder() below. A table lookup is
+// cheaper per byte than re-deriving it with shifts every time, which matters
+// once this runs across a ~200MB buffer.
+const BIT_REVERSE_TABLE = (() => {
+  const t = new Uint8Array(256);
+  for(let i = 0; i < 256; i++){
+    let b = i, r = 0;
+    for(let k = 0; k < 8; k++){ r = (r << 1) | (b & 1); b >>= 1; }
+    t[i] = r;
+  }
+  return t;
+})();
+
+// Reverses the ENTIRE bit sequence of `bytes`, treating the whole buffer as
+// one long bit string rather than reversing bits within each byte in place.
+// The very last bit of the buffer becomes the very first bit of the output,
+// which means byte order flips too: out[i] is BIT_REVERSE_TABLE applied to
+// bytes[length-1-i], not to bytes[i]. It's its own inverse (reversing twice
+// restores the original), which is what lets maskBytes/unmaskBytes below
+// undo it symmetrically without a separate "unreverse" function.
+// Yields periodically for the same reason as fillPseudorandomStream/
+// arxMixWords — a synchronous pass over a near-200MB buffer would freeze
+// the tab (dev.md §2).
+async function reverseBitOrder(bytes){
+  const n = bytes.length;
+  const out = new Uint8Array(n);
+  for(let i = 0; i < n; i++){
+    out[i] = BIT_REVERSE_TABLE[bytes[n - 1 - i]];
+    if((i & 0xffffff) === 0) await yieldToUI(); // roughly every 16M bytes
+  }
+  return out;
+}
+
+// Single application of the XOR-then-ARX layer described above, parameterized
+// on which domain tags to derive its keystream/round material from. This is
+// the whole of what maskBytes/unmaskBytes used to do directly; it's now
+// applied twice (see maskBytes below) with different tags each time, so it's
+// factored out rather than duplicated.
+async function maskBytesOnce(bytes, xorTag, roundTag){
+  const maskSeed = await envelopeDomainSeed(xorTag);
   const xorStream = await fillPseudorandomStream(maskSeed, bytes.length);
   const out = new Uint8Array(bytes.length);
   for(let i = 0; i < bytes.length; i++) out[i] = bytes[i] ^ xorStream[i];
 
   const wordCount = out.length >> 2;
   if(wordCount > 0){
-    const roundSeed = await envelopeDomainSeed(ROUND_MATERIAL_TAG);
+    const roundSeed = await envelopeDomainSeed(roundTag);
     const roundMaterial = await fillPseudorandomStream(roundSeed, wordCount * 4);
     await arxMixWords(out.subarray(0, wordCount * 4), roundMaterial, false);
   }
   return out;
 }
 
-async function unmaskBytes(bytes){
+// Inverse of maskBytesOnce for the same tag pair.
+async function unmaskBytesOnce(bytes, xorTag, roundTag){
   const out = new Uint8Array(bytes); // copy — never mutate the caller's buffer
 
   const wordCount = out.length >> 2;
   if(wordCount > 0){
-    const roundSeed = await envelopeDomainSeed(ROUND_MATERIAL_TAG);
+    const roundSeed = await envelopeDomainSeed(roundTag);
     const roundMaterial = await fillPseudorandomStream(roundSeed, wordCount * 4);
     await arxMixWords(out.subarray(0, wordCount * 4), roundMaterial, true);
   }
 
-  const maskSeed = await envelopeDomainSeed(MASK_STREAM_TAG);
+  const maskSeed = await envelopeDomainSeed(xorTag);
   const xorStream = await fillPseudorandomStream(maskSeed, out.length);
   for(let i = 0; i < out.length; i++) out[i] ^= xorStream[i];
   return out;
+}
+
+// maskBytes = maskOnce, reverseBitOrder, maskOnce again (different tags),
+// reverseBitOrder again.
+//
+// WHY: within a single maskBytesOnce pass, arxMixWords' mixing accumulator
+// only carries forward — word i's output folds in word i-1's output, never
+// word i+1's. So in one pass, flipping a byte near the END of the buffer has
+// NO effect at all on bytes near the start; diffusion is one-directional.
+// Reversing the entire buffer's bit order between the two passes (not just
+// each byte's bits — the whole thing, so byte order flips too) means
+// whatever was near the end for pass 1 is near the start for pass 2, and
+// vice versa. Running maskBytesOnce again on that reversed buffer mixes in
+// the other direction. Combined, a change anywhere in the input now
+// propagates through the entire output, not just through what followed it.
+// The final reverseBitOrder restores the original byte/bit orientation so
+// output length and layout otherwise still line up the way callers expect.
+//
+// Pass 2 uses MASK_STREAM_TAG_2/ROUND_MATERIAL_TAG_2 (not the pass-1 tags)
+// so it isn't the same keystream/round material folded over a permutation
+// of its own output — see the comment on those constants.
+async function maskBytes(bytes){
+  const pass1 = await maskBytesOnce(bytes, MASK_STREAM_TAG, ROUND_MATERIAL_TAG);
+  const flipped1 = await reverseBitOrder(pass1);
+  const pass2 = await maskBytesOnce(flipped1, MASK_STREAM_TAG_2, ROUND_MATERIAL_TAG_2);
+  return await reverseBitOrder(pass2);
+}
+
+// Exact inverse of maskBytes, undoing each step in reverse order. Because
+// reverseBitOrder is its own inverse, undoing it is just calling it again —
+// there's no separate "unreverse" function needed.
+async function unmaskBytes(bytes){
+  const flipped2 = await reverseBitOrder(bytes);
+  const pass2Undone = await unmaskBytesOnce(flipped2, MASK_STREAM_TAG_2, ROUND_MATERIAL_TAG_2);
+  const flipped1 = await reverseBitOrder(pass2Undone);
+  return await unmaskBytesOnce(flipped1, MASK_STREAM_TAG, ROUND_MATERIAL_TAG);
 }
 
 // packet -> opaque base64 blob (no braces, quotes, or field names visible)
