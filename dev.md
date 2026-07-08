@@ -95,20 +95,29 @@ gets extra scrutiny. Specifically:
   never touch the object that's fed into `JSON.stringify` for AAD purposes.
 - **Never conflate the obfuscation layer with encryption.** `maskBytes` /
   `unmaskBytes` / `ENVELOPE_SEED` (see `docs.md` §3.1) is cosmetic
-  camouflage, not a secret and not a security boundary — it now has two
-  parts, a keystream XOR (no periodicity, but no diffusion either — XOR
-  structurally can't provide diffusion no matter how the keystream is
-  generated) and a separate chained ARX pass (rotation + addition-with-
-  carry) that does provide real diffusion. Both are still about not
-  looking recognizable, not about resisting a real adversary. Don't let a
-  future change start treating either one as a security property (e.g.
-  "we could skip real encryption for X since it's masked anyway" — no).
-  Note the layer is no longer its own inverse: `maskBytes` and
-  `unmaskBytes` are separate `async` functions (both call
-  `crypto.subtle.digest` once, for the domain seed) — every call site
-  must `await` them and use the right direction. `encodeOpaquePacket`,
-  `decodeOpaquePacket`, and `buildLargeExportParts` are all `async` for
-  this reason.
+  camouflage, not a secret and not a security boundary. Each of
+  `maskBytes`/`unmaskBytes` runs a keystream XOR (no periodicity, but no
+  diffusion either — XOR structurally can't provide diffusion no matter
+  how the keystream is generated) plus a chained ARX pass (rotation +
+  addition-with-carry, real diffusion) **twice**, with a full
+  `reverseBitOrder()` of the buffer between the two applications, because
+  the ARX accumulator only carries forward within one pass (a change near
+  the end of the buffer wouldn't otherwise affect the start at all — see
+  the comment above `maskBytes` in `constants.js`). Both applications are
+  still about not looking recognizable, not about resisting a real
+  adversary. Don't let a future change start treating either one as a
+  security property (e.g. "we could skip real encryption for X since it's
+  masked anyway" — no).
+  Note the layer is not its own inverse: `maskBytes` and `unmaskBytes` are
+  separate `async` functions (each calls `crypto.subtle.digest` four
+  times now — once per XOR/ARX domain tag, two tags per pass, two passes)
+  — every call site must `await` them and use the right direction.
+  `encodeOpaquePacket`, `decodeOpaquePacket`, and `buildLargeExportParts`
+  are all `async` for this reason. If you touch this construction again,
+  keep `maskBytesOnce`/`unmaskBytesOnce` (the single-pass primitive) and
+  `reverseBitOrder` factored out rather than inlining a third variant —
+  the pairing of tags between a mask pass and its corresponding unmask
+  pass is easy to get backwards otherwise.
 - **Respect `MAX_SKIP` / `MAX_SKIPPED_KEYS`.** These bound how much work a
   malicious or buggy peer can force. If you add a new code path that walks
   the hash chain or caches message keys, it needs the same bounds.
@@ -240,10 +249,16 @@ Treat these as a checklist, not a suggestion, for anything touching
       including a length that isn't a multiple of 4 (exercises the
       tail-bytes-are-XOR-only path) and the empty buffer, whenever the
       mask/ARX construction or its constants change.
-- [ ] **Masking actually diffuses**: flip one byte of a test buffer,
-      mask both versions, and confirm bytes from that word onward differ
-      in a large fraction of positions (not just the one flipped byte —
-      that would mean the ARX pass regressed to being pure XOR).
+- [ ] **Masking actually diffuses, in both directions**: flip one byte of
+      a test buffer, mask both versions, and confirm bytes across the
+      *entire* output differ in a large fraction of positions — including
+      the word(s) *before* the flipped byte, not just from that word
+      onward. (Within a single `maskBytesOnce` pass, diffusion is
+      forward-only by construction; it's the `reverseBitOrder` between
+      the two passes in `maskBytes` that makes it bidirectional overall.
+      A regression that dropped or misordered the bit-reversal step would
+      still pass a forward-only version of this check, so don't weaken it
+      back to that.)
 - [ ] **No short periodicity** in the keystream layer (e.g. mask an
       all-zero buffer and check for a repeating pattern at any short
       offset) whenever the keystream generator changes.

@@ -133,43 +133,60 @@ prefix that anyone who's seen a JWT recognizes on sight.
 
 Instead, `encodeOpaquePacket()` / `decodeOpaquePacket()` run the packet
 bytes through `maskBytes()` / `unmaskBytes()`, then base64-encode/decode.
-That function is two layers, applied in order (and undone in reverse
-order by `unmaskBytes()`):
+Internally that's a single "layer" (XOR keystream + chained ARX mix)
+applied **twice**, with a full bit-reversal of the buffer in between —
+`maskBytesOnce → reverseBitOrder → maskBytesOnce → reverseBitOrder` —
+and undone in exact reverse order by `unmaskBytes()`. What each piece does:
 
-**Layer 1 — XOR against a pseudorandom keystream.** This is what breaks
-the `{"` / `eyJ` byte pattern. A short *repeating* XOR key (the original
-approach) would leave a short repeating period in the output — itself a
-giveaway via autocorrelation or a byte-frequency count — so the keystream
-here has no such period (see "keystream generation" below). Worth being
-precise about what this layer does *not* do: XOR has no diffusion,
+**The XOR sub-layer.** Against a pseudorandom keystream — this is what
+breaks the `{"` / `eyJ` byte pattern. A short *repeating* XOR key (the
+original approach) would leave a short repeating period in the output —
+itself a giveaway via autocorrelation or a byte-frequency count — so the
+keystream here has no such period (see "keystream generation" below).
+Worth being precise about what this does *not* do: XOR has no diffusion,
 regardless of how the keystream is generated — output byte *i* depends
-on input byte *i* and nothing else. Removing periodicity is a real
-improvement over the original fixed-key version, but it's not the same
-thing as diffusion, and an earlier draft of this document conflated the
-two; layer 2 is what actually adds diffusion.
+on input byte *i* and nothing else.
 
-**Layer 2 — a chained ARX mixing pass.** Applied on top of layer 1's
+**The ARX sub-layer.** A chained mixing pass applied on top of the XOR
 output, 4 bytes at a time (`arxMixWords()`). Each word's transform folds
 in an accumulator carried from the *previous* word's output, so changing
-one word changes every word after it — real forward diffusion, not just
-pattern-breaking. Within a word: ordinary 32-bit addition (`(word + acc +
-roundConstant) >>> 0`) provides genuine carry propagation across bit
-positions, which XOR alone never has, and a bitwise rotation by 1–31 bits
-spreads that across byte boundaries. The trailing 0–3 bytes that don't
-form a full word (for a payload whose length isn't a multiple of 4) are
-left XOR-only — there's nothing after them to diffuse into.
+one word changes every word after it. Within a word: ordinary 32-bit
+addition (`(word + acc + roundConstant) >>> 0`) provides genuine carry
+propagation across bit positions, which XOR alone never has, and a
+bitwise rotation by 1–31 bits spreads that across byte boundaries. The
+trailing 0–3 bytes that don't form a full word are left XOR-only —
+there's nothing after them to diffuse into.
 
-**Keystream generation.** Both layers' pseudorandom material come from
-`fillPseudorandomStream()`, which derives a 32-bit seed from the public
-`ENVELOPE_SEED` via one SHA-256 call, then expands it with mulberry32, a
-small fast synchronous PRNG — not cryptographically secure, and not
-meant to be; it's chosen for speed. The earlier version of this layer
-hashed every 32-byte block with SHA-256 directly, which for this tool's
-largest supported export (~200MB) means millions of async
+**Why apply it twice.** That accumulator chain only carries *forward*:
+within one pass, a change near the *end* of the buffer has zero effect
+on bytes near the *start* — diffusion is one-directional. `maskBytes()`
+fixes this by reversing the entire buffer's bit order (`reverseBitOrder()`
+— the whole bit sequence, not just the bits within each byte, so byte
+order flips too) between the two passes. Whatever was near the end for
+pass 1 is near the start for pass 2, so the second pass mixes in the
+other direction; the closing `reverseBitOrder()` restores the original
+orientation. `reverseBitOrder()` is its own inverse (reversing twice
+restores the input), so `unmaskBytes()` doesn't need a separate
+"unreverse" — it just calls the same function again while undoing the
+other steps in reverse order. The second pass derives its keystream and
+round material from different domain tags than the first (see below), so
+it isn't the same material re-applied to a permutation of its own output.
+
+**Keystream generation.** Both sub-layers' pseudorandom material come
+from `fillPseudorandomStream()`, which derives a 32-bit seed from the
+public `ENVELOPE_SEED` (and, per pass, a distinct one-byte domain tag)
+via one SHA-256 call, then expands it with mulberry32, a small fast
+synchronous PRNG — not cryptographically secure, and not meant to be;
+it's chosen for speed. The earlier version of this layer hashed every
+32-byte block with SHA-256 directly, which for this tool's largest
+supported export (~200MB) means millions of async
 `crypto.subtle.digest` calls — measured in the tens of seconds. The
 current version measures in the hundreds of milliseconds for a 20MB
 payload in a real browser page (proportionally a couple of seconds at
-200MB).
+200MB) for a *single* pass; since the two-pass construction above runs
+that work twice plus two linear bit-reversal passes, budget roughly
+double that end to end (isolated testing shows close to a 2x
+multiplier; the bit-reversal passes themselves are cheap by comparison).
 
 None of this is a secret: the seed is public, ships in this file, and
 anyone with this source can regenerate the exact same streams. That's
@@ -186,6 +203,37 @@ output box, what gets copied to the clipboard, and what gets written to
 > "not a valid encrypted message" rather than silently returning garbage —
 > but old exports do need to be re-sent/re-encrypted with the current
 > version.
+>
+> **Second breaking change (this revision):** `maskBytes`/`unmaskBytes`
+> went from a single XOR+ARX pass to the two-pass-with-bit-reversal
+> construction described above. Same consequence as the previous
+> breaking change — anything masked with the one-pass version (including
+> the previous revision's exports) won't decode with this version, and
+> vice versa. Still fails cleanly rather than silently, for the same
+> reason.
+
+### 3.1.1 Diffusion characteristics (measured)
+
+Verified with a standalone Node harness exercising `maskBytes`/
+`unmaskBytes` directly (round trips, known-value checks on
+`reverseBitOrder`, and bit-level avalanche comparisons — not part of the
+in-browser test suite in dev.md §6, since it only needs `constants.js`):
+
+- Flipping the *last* bit of a buffer changed **0 of 32 bits** in the
+  first output word under the old single pass (confirming the
+  forward-only limitation above), versus **roughly a third to half** of
+  those 32 bits under the current two-pass construction.
+- Across a whole 4096-byte buffer, flipping one input bit changes on the
+  order of 40–50% of output bits — the range expected of a decent
+  avalanche effect, though this is a cosmetic layer and no formal
+  avalanche guarantee is being claimed.
+- A constant-byte input (worst case for revealing a short period) showed
+  no repeating period up to 64 bytes in the output.
+- Round trips (`unmaskBytes(maskBytes(x)) === x`) were verified across
+  buffer lengths from 0 to 500,000 bytes, including lengths not a
+  multiple of 4, and separately at ~5MB.
+
+
 
 ### 3.2 Large-file streaming format
 
@@ -314,7 +362,8 @@ Split out of what used to be one `script.js`, along the same four regions
 that file was already organized into internally:
 
 - **`constants.js`** — thresholds (§4 table), `yieldToUI`, the envelope
-  obfuscation layer (`maskBytes`/`unmaskBytes`/`arxMixWords`/
+  obfuscation layer (`maskBytes`/`unmaskBytes`/`maskBytesOnce`/
+  `unmaskBytesOnce`/`reverseBitOrder`/`arxMixWords`/
   `fillPseudorandomStream`/`encodeOpaquePacket`/`decodeOpaquePacket`, §3.1),
   and base64/byte utilities (`b64`, `unb64`, `bytesEqual`, `compareBytes`,
   `concatBytes`). No dependencies on the other three files.
