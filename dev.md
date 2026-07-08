@@ -94,16 +94,21 @@ gets extra scrutiny. Specifically:
   operate on the *whole packet* rather than re-deriving `header` — they
   never touch the object that's fed into `JSON.stringify` for AAD purposes.
 - **Never conflate the obfuscation layer with encryption.** `maskBytes` /
-  `ENVELOPE_SEED` (see `docs.md` §3) is cosmetic camouflage, not a secret
-  and not a security boundary — the keystream construction was strengthened
-  for better avalanche/diffusion characteristics (no more short repeating
-  XOR period), but that's still about not looking recognizable, not about
-  resisting a real adversary. Don't let a future change start treating it
-  as one (e.g. "we could skip real encryption for X since it's masked
-  anyway" — no). Note `maskBytes` is `async` (it calls `crypto.subtle.digest`),
-  so every call site must `await` it — `encodeOpaquePacket`,
+  `unmaskBytes` / `ENVELOPE_SEED` (see `docs.md` §3.1) is cosmetic
+  camouflage, not a secret and not a security boundary — it now has two
+  parts, a keystream XOR (no periodicity, but no diffusion either — XOR
+  structurally can't provide diffusion no matter how the keystream is
+  generated) and a separate chained ARX pass (rotation + addition-with-
+  carry) that does provide real diffusion. Both are still about not
+  looking recognizable, not about resisting a real adversary. Don't let a
+  future change start treating either one as a security property (e.g.
+  "we could skip real encryption for X since it's masked anyway" — no).
+  Note the layer is no longer its own inverse: `maskBytes` and
+  `unmaskBytes` are separate `async` functions (both call
+  `crypto.subtle.digest` once, for the domain seed) — every call site
+  must `await` them and use the right direction. `encodeOpaquePacket`,
   `decodeOpaquePacket`, and `buildLargeExportParts` are all `async` for
-  exactly this reason.
+  this reason.
 - **Respect `MAX_SKIP` / `MAX_SKIPPED_KEYS`.** These bound how much work a
   malicious or buggy peer can force. If you add a new code path that walks
   the hash chain or caches message keys, it needs the same bounds.
@@ -198,9 +203,10 @@ changes in this project so far) is:
    page's scope.
 4. `crypto.getRandomValues()` caps at 65536 bytes per call in both the
    browser and Node — fill larger test buffers in a loop, not one call.
-5. `maskBytes`, `encodeOpaquePacket`, `decodeOpaquePacket`, and
-   `buildLargeExportParts` are all `async` (they call `crypto.subtle.digest`
-   internally) — remember to `await` them in test code, same as production.
+5. `maskBytes`, `unmaskBytes`, `encodeOpaquePacket`, `decodeOpaquePacket`,
+   and `buildLargeExportParts` are all `async` (they call
+   `crypto.subtle.digest` internally, once per call for the domain seed) —
+   remember to `await` them in test code, same as production.
 
 ### 6.2 Required automated coverage before merging a crypto/format change
 
@@ -230,8 +236,25 @@ Treat these as a checklist, not a suggestion, for anything touching
       `decodeOpaquePacket` reproduces the original packet exactly, and
       `decodeOpaquePacket` throws (doesn't silently return garbage) on
       non-base64 or non-JSON-after-unmasking input.
-- [ ] **`maskBytes` is its own inverse** (masking twice returns the
-      original bytes) whenever the mask constant or algorithm changes.
+- [ ] **`unmaskBytes(maskBytes(x)) === x`** for representative lengths,
+      including a length that isn't a multiple of 4 (exercises the
+      tail-bytes-are-XOR-only path) and the empty buffer, whenever the
+      mask/ARX construction or its constants change.
+- [ ] **Masking actually diffuses**: flip one byte of a test buffer,
+      mask both versions, and confirm bytes from that word onward differ
+      in a large fraction of positions (not just the one flipped byte —
+      that would mean the ARX pass regressed to being pure XOR).
+- [ ] **No short periodicity** in the keystream layer (e.g. mask an
+      all-zero buffer and check for a repeating pattern at any short
+      offset) whenever the keystream generator changes.
+
+Note when benchmarking `constants.js`'s masking functions: `vm.createContext()`
+(used by the harness above) has real cross-realm overhead of its own —
+identical code measured roughly 30x slower inside a vm sandbox than in
+plain Node or a real browser page during development of the ARX pass.
+Don't tune the masking implementation against vm-sandboxed timings; use a
+loose bound there and verify real timing in the browser QA pass instead
+(§6.3).
 
 ### 6.3 Manual / browser QA checklist
 
