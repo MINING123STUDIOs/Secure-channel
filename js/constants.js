@@ -375,20 +375,20 @@ async function unmaskBytesOnce(bytes, xorTag, roundTag){
 // so it isn't the same keystream/round material folded over a permutation
 // of its own output — see the comment on those constants.
 async function maskBytes(bytes){
-  const pass1 = await maskBytesOnce(bytes, MASK_STREAM_TAG, ROUND_MATERIAL_TAG);
-  const flipped1 = await reverseBitOrder(pass1);
-  const pass2 = await maskBytesOnce(flipped1, MASK_STREAM_TAG_2, ROUND_MATERIAL_TAG_2);
-  return await reverseBitOrder(pass2);
+  const pass1 = await reverseBitOrder(bytes); 
+  const flipped1 = await maskBytesOnce(pass1, MASK_STREAM_TAG, ROUND_MATERIAL_TAG);
+  const pass2 = await reverseBitOrder(flipped1);
+  return await maskBytesOnce(pass2, MASK_STREAM_TAG_2, ROUND_MATERIAL_TAG_2);
 }
 
 // Exact inverse of maskBytes, undoing each step in reverse order. Because
 // reverseBitOrder is its own inverse, undoing it is just calling it again —
 // there's no separate "unreverse" function needed.
 async function unmaskBytes(bytes){
-  const flipped2 = await reverseBitOrder(bytes);
-  const pass2Undone = await unmaskBytesOnce(flipped2, MASK_STREAM_TAG_2, ROUND_MATERIAL_TAG_2);
-  const flipped1 = await reverseBitOrder(pass2Undone);
-  return await unmaskBytesOnce(flipped1, MASK_STREAM_TAG, ROUND_MATERIAL_TAG);
+  const flipped2 = await unmaskBytesOnce(bytes, MASK_STREAM_TAG_2, ROUND_MATERIAL_TAG_2);
+  const pass2Undone = await reverseBitOrder(flipped2);
+  const flipped1 = await unmaskBytesOnce(pass2Undone, MASK_STREAM_TAG, ROUND_MATERIAL_TAG);
+  return await reverseBitOrder(flipped1); 
 }
 
 // packet -> opaque base64 blob (no braces, quotes, or field names visible)
