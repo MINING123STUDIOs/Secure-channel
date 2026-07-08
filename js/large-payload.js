@@ -105,7 +105,7 @@ async function streamingParseLargeFile(blob, windowSize, onProgress){
         if(line !== LARGE_FORMAT_MAGIC) throw new Error("not a recognized large-file export");
         state = "header";
       } else if(state === "header"){
-        const headerBytes = await maskBytes(unb64(line));
+        const headerBytes = await unmaskBytes(unb64(line));
         headerObj = JSON.parse(new TextDecoder().decode(headerBytes));
         state = "iv";
       } else if(state === "iv"){
