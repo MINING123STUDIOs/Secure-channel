@@ -83,7 +83,18 @@ committed to the session after a successful decrypt (`_skipToPure`,
 Limits: up to `MAX_SKIP` (1000) messages can be skipped in one jump, and up
 to `MAX_SKIPPED_KEYS` (2000) unread out-of-order keys are cached at once —
 both are sanity limits against a malicious or buggy peer forcing unbounded
-memory growth.
+memory growth. When the cache is full, the oldest entries are evicted
+(LRU) rather than rejecting new messages outright.
+
+`decrypt()` enforces a rate limit of `DECRYPT_RATE_LIMIT` (2) decryption
+attempts per second per session, measured via a sliding 1-second timestamp
+window. This mitigates brute-force or timing-analysis attempts against the
+AES-GCM tag.
+
+Incoming packets are validated before processing: `header.dh` is checked for
+valid base64 and correct length (65 bytes for an uncompressed P-256 public
+key), `header.n` and `header.pn` must be non-negative integers, and
+`packet.iv` must be valid base64 decoding to exactly 12 bytes.
 
 ### 2.3 Fingerprints
 
@@ -300,7 +311,8 @@ explained in the comment block at the top of `js/constants.js`:
 | `CHUNK_BYTES` | 64 MB | Size of each raw chunk before base64-encoding. |
 | `IMPORT_WINDOW` | 32 MB | Read window size when streaming-importing a large file. |
 | `MAX_SKIP` | 1000 | Max out-of-order messages skippable in one jump. |
-| `MAX_SKIPPED_KEYS` | 2000 | Max cached out-of-order message keys. |
+| `MAX_SKIPPED_KEYS` | 2000 | Max cached out-of-order message keys (LRU-evicted when full). |
+| `DECRYPT_RATE_LIMIT` | 2 | Max decryption attempts per second per session. |
 
 ### Progress indicator
 
@@ -320,9 +332,11 @@ on very large files.
 
 1. **Generate Key Pair.** Creates your identity key pair. Your public key
    (safe to share) and its fingerprint appear immediately; your private key
-   is hidden behind a password field — click **Show** (with an inline
-   confirmation) to reveal it, or **Copy**/**Export** it (also confirmed).
-   A new confirmation on the same output area cancels the previous one.
+   is stored in a JavaScript variable (not the DOM) and shown behind a
+   password field — click **Show** (with an inline confirmation) to reveal
+   it temporarily, or **Copy**/**Export** it (also confirmed) using the
+   JS variable directly. A new confirmation on the same output area cancels
+   the previous one.
 2. **Share only your public key** with your contact, and paste theirs into
    **Peer's public key**. Both of you do this once.
 3. **Create Shared Secret.** Derives the session. The status line and the
@@ -357,8 +371,10 @@ safety net.
 ### `index.html`
 Structure only: the info panel, the four numbered panels (Key Generation,
 Shared Secret, Encrypt, Decrypt), and the footer. All interactivity is
-wired via `onclick` handlers calling into the `js/` scripts. Note that
-`cipherOut`, `plainOut`, and `privKeyOut` are *result* boxes — they only
+wired via `onclick` handlers calling into the `js/` scripts. Includes a
+Content Security Policy meta tag restricting scripts to `'self'` and
+blocking network requests, iframes, and plugins. Note that `cipherOut`,
+`plainOut`, and `privKeyOut` are *result* boxes — they only
 get Copy/Export controls (or inline confirmations), not Import, since
 importing a file into an output space doesn't make sense. Only genuine
 input fields (`peerKey`, `msg`, `cipherIn`, plus the identity-level
@@ -395,8 +411,9 @@ that file was already organized into internally:
   `unmaskBytesOnce`/`reverseBitOrder`/`arxMixWords`/
   `fillPseudorandomStream`/`encodeOpaquePacket`/`decodeOpaquePacket`/`encodeOpaquePacketBinary`/`decodeOpaquePacketBinary`, §3.1),
   binary format magic constants (`BIN_MAGIC_SMALL`/`BIN_MAGIC_LARGE`),
-  and base64/byte utilities (`b64`, `unb64`, `bytesEqual`, `compareBytes`,
-  `concatBytes`). No dependencies on the other files.
+  `secureClear()` for zeroing sensitive buffers, and base64/byte utilities
+  (`b64`, `unb64`, `bytesEqual`, `compareBytes`, `concatBytes`).
+  No dependencies on the other files.
 - **`msg.js`** — all user-facing strings (error messages, status messages,
   confirmation warnings, button labels, progress labels) extracted into
   named constants. No dependencies on other files; loaded after
@@ -404,14 +421,15 @@ that file was already organized into internally:
 - **`crypto-core.js`** — `generateIdentityKeyPair`, `generateDHKeyPair`,
   `dh`, `kdfRK`, `kdfCK`, `deriveMessageAesKey`, `fingerprintOf`,
   `computeInitialSharedSecret`, and the `RatchetSession` class
-  (`encrypt`/`decrypt`) described in §2. Depends on `constants.js` for the
-  byte helpers and `MAX_SKIP`/`MAX_SKIPPED_KEYS`.
+  (`encrypt`/`decrypt`/`clear`) described in §2. Depends on `constants.js` for
+  the byte helpers, `MAX_SKIP`/`MAX_SKIPPED_KEYS`, and `DECRYPT_RATE_LIMIT`.
 - **`large-payload.js`** — `bytesToBase64Chunks`/`base64ChunksToBytes`,
   `buildLargeExportParts`/`streamingParseLargeFile` (legacy text `.scl` format),
   `buildLargeExportPartsBinary`/`streamingParseLargeBinaryFile` (current binary `.scb` format, §3.2, §4).
   Depends on `constants.js` (`yieldToUI`, `maskBytes`/`unmaskBytes`, thresholds,
   binary magic constants); does not depend on `crypto-core.js`.
-- **`ui.js`** — session state (`kp`, `session`, etc.), theme toggle, the
+- **`ui.js`** — session state (`kp`, `session`, `myPrivKeyB64`,
+  `lastEncryptedPacketB64`), theme toggle, the
   `Progress` indicator module, status/copy/export/import helpers, key
   generation & identity import/export, the show/hide toggle, and the
   top-level `doEncrypt`/`doDecrypt` handlers that tie everything together.

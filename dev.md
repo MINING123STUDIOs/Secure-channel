@@ -88,6 +88,15 @@ gets extra scrutiny. Specifically:
   succeeds) would let a single corrupted or malicious packet permanently
   desync a session. Any change to `decrypt()` should be re-verified against
   this property specifically.
+- **`decrypt()` enforces a rate limit.** `DECRYPT_RATE_LIMIT` (currently 2
+  per second) is enforced via a sliding timestamp window in
+  `RatchetSession._decryptTimestamps`. If you add new code paths that call
+  `crypto.subtle.decrypt`, they must also respect this limit — it exists to
+  prevent brute-force or timing-analysis attempts against the AES-GCM tag.
+- **Incoming packets must be validated.** `decrypt()` checks `header.dh`
+  (valid base64, 65-byte P-256 uncompressed key), `header.n`/`header.pn`
+  (non-negative integers), and `packet.iv` (valid base64, 12 bytes) before
+  processing. Any new packet fields must receive the same treatment.
 - **The AAD (associated data) must exactly match what the sender
   authenticated.** `JSON.stringify(header)` is used as AAD on both sides;
   if you ever change how a header is constructed or serialized, both
@@ -124,15 +133,29 @@ gets extra scrutiny. Specifically:
   and its corresponding unmask pass is easy to get backwards otherwise.
 - **Respect `MAX_SKIP` / `MAX_SKIPPED_KEYS`.** These bound how much work a
   malicious or buggy peer can force. If you add a new code path that walks
-  the hash chain or caches message keys, it needs the same bounds.
+  the hash chain or caches message keys, it needs the same bounds. When the
+  skipped-key cache is full, old entries are evicted (LRU) rather than
+  rejecting new messages — keep this behavior if you change the cache
+  implementation.
 - **No new cryptographic primitives without a strong reason.** The current
   set (ECDH P-256, HKDF-SHA256, HMAC-SHA256, AES-256-GCM) is deliberate and
   all available natively via `crypto.subtle`. Don't add a hand-rolled
   cipher, a non-constant-time comparison for secret material (`bytesEqual`
   is already constant-time-ish via OR-accumulation — keep that pattern for
   any new secret comparison), or a "simpler" KDF.
-- **Don't log secret material.** `console.error(e)` on a caught exception
-  is fine; logging a key, a derived AES key, or plaintext content is not.
+- **Don't log secret material.** `console.error(e.message)` on a caught
+  exception is fine; logging a key, a derived AES key, or plaintext content
+  is not. Never log the full exception object (`e`) — only `e.message`, to
+  avoid leaking keys in stack traces or structured exception data.
+- **Zero sensitive buffers after use.** Call `secureClear()` on any
+  `ArrayBuffer` or `Uint8Array` that held a private key, derived AES key,
+  or plaintext bytes. The garbage collector will eventually reclaim the
+  memory, but explicit zeroing reduces the window of vulnerability.
+- **CSP is enforced.** `index.html` includes a Content Security Policy meta
+  tag restricting scripts to `'self'` (plus `'unsafe-inline'` for onclick
+  handlers). Any new script must be loaded via a `<script src>` tag, not
+  injected dynamically. No network requests, iframes, or plugins are
+  permitted by the policy.
 
 ---
 

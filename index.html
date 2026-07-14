@@ -20,6 +20,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8" />
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'none'; frame-src 'none'; object-src 'none'; base-uri 'self'; form-action 'none'">
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
 <title>Secure Channel Assistant v4</title>
 <link rel="stylesheet" href="style.css">
@@ -130,7 +131,6 @@
   <div>
     <h3>3. Encrypt ✉️🔒</h3>
     <div class="field">
-    <label class="small" for="msg">📝 Message input</label>
       <textarea id="msg" placeholder="Type a message, or import any file below (text, image, anything)..."></textarea>
       <div class="btnrow">
         <button class="iconbtn" onclick="copyBox('msg')" title="Copy">📋 Copy</button>
@@ -153,7 +153,6 @@
   <div>
     <h3>4. Decrypt 📩🔓</h3>
     <div class="field">
-      <label class="small" for="cipherIn">Paste encrypted message</label>
       <textarea id="cipherIn" placeholder="Paste encrypted message"></textarea>
       <div class="btnrow">
         <button class="iconbtn" onclick="copyBox('cipherIn')" title="Copy">📋 Copy</button>
