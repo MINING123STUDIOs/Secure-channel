@@ -112,12 +112,13 @@ gets extra scrutiny. Specifically:
   separate `async` functions (each calls `crypto.subtle.digest` four
   times now — once per XOR/ARX domain tag, two tags per pass, two passes)
   — every call site must `await` them and use the right direction.
-  `encodeOpaquePacket`, `decodeOpaquePacket`, and `buildLargeExportParts`
-  are all `async` for this reason. If you touch this construction again,
-  keep `maskBytesOnce`/`unmaskBytesOnce` (the single-pass primitive) and
-  `reverseBitOrder` factored out rather than inlining a third variant —
-  the pairing of tags between a mask pass and its corresponding unmask
-  pass is easy to get backwards otherwise.
+  `encodeOpaquePacket`, `decodeOpaquePacket`, `encodeOpaquePacketBinary`,
+  `decodeOpaquePacketBinary`, `buildLargeExportParts`, and
+  `buildLargeExportPartsBinary` are all `async` for this reason. If you
+  touch this construction again, keep `maskBytesOnce`/`unmaskBytesOnce`
+  (the single-pass primitive) and `reverseBitOrder` factored out rather
+  than inlining a third variant — the pairing of tags between a mask pass
+  and its corresponding unmask pass is easy to get backwards otherwise.
 - **Respect `MAX_SKIP` / `MAX_SKIPPED_KEYS`.** These bound how much work a
   malicious or buggy peer can force. If you add a new code path that walks
   the hash chain or caches message keys, it needs the same bounds.
@@ -139,11 +140,14 @@ gets extra scrutiny. Specifically:
   **Any breaking change to the packet shape must bump `v`**, and
   `decrypt()`'s format check (`packet.v !== 3`) must be updated to handle
   (or explicitly reject with a clear error) old versions.
-- The large-file streaming format (`LARGE_FORMAT_MAGIC` + line-based
-  fields) is a separate, parallel format from the in-memory packet — if you
-  change the packet shape, update `buildLargeExportParts` /
-  `streamingParseLargeFile` to match, and re-run the round-trip test (§5)
-  for both the small and large paths.
+- The large-file streaming formats (`LARGE_FORMAT_MAGIC` + line-based
+  fields for legacy `.scl`, `BIN_MAGIC_SMALL`/`BIN_MAGIC_LARGE` + binary
+  structure for current `.scb`) are separate, parallel formats from the
+  in-memory packet — if you change the packet shape, update
+  `buildLargeExportParts` / `streamingParseLargeFile` (legacy) and
+  `buildLargeExportPartsBinary` / `streamingParseLargeBinaryFile` (current)
+  to match, and re-run the round-trip test (§6.2) for both the small and
+  large paths, both binary and text formats.
 - Changing `CHUNK_BYTES`, `IMPORT_WINDOW`, or any threshold is safe at any
   time (they're not part of the wire format), but changing anything that
   ends up inside the exported bytes (magic token, header shape, mask
@@ -213,9 +217,11 @@ changes in this project so far) is:
 4. `crypto.getRandomValues()` caps at 65536 bytes per call in both the
    browser and Node — fill larger test buffers in a loop, not one call.
 5. `maskBytes`, `unmaskBytes`, `encodeOpaquePacket`, `decodeOpaquePacket`,
-   and `buildLargeExportParts` are all `async` (they call
-   `crypto.subtle.digest` internally, once per call for the domain seed) —
-   remember to `await` them in test code, same as production.
+   `encodeOpaquePacketBinary`, `decodeOpaquePacketBinary`,
+   `buildLargeExportParts`, and `buildLargeExportPartsBinary` are all
+   `async` (they call `crypto.subtle.digest` internally, once per call
+   for the domain seed) — remember to `await` them in test code, same
+   as production.
 
 ### 6.2 Required automated coverage before merging a crypto/format change
 
@@ -236,15 +242,21 @@ Treat these as a checklist, not a suggestion, for anything touching
       chunks, round-tripped through `encrypt`/`decrypt`, verified
       byte-for-byte equal, with the `onProgress` callback firing once per
       chunk and reaching `1.0`.
-- [ ] **Streaming large-file format**: build via `buildLargeExportParts`,
-      parse via `streamingParseLargeFile`, confirm the reconstructed
-      header/iv match exactly (this is the case most likely to silently
-      break the AAD match — see §3) and that the reconstructed packet
-      still decrypts.
+- [ ] **Streaming large-file format (text `.scl`)**: build via
+      `buildLargeExportParts`, parse via `streamingParseLargeFile`, confirm
+      the reconstructed header/iv match exactly (this is the case most
+      likely to silently break the AAD match — see §3) and that the
+      reconstructed packet still decrypts.
+- [ ] **Streaming large-file format (binary `.scb`)**: build via
+      `buildLargeExportPartsBinary`, parse via `streamingParseLargeBinaryFile`,
+      confirm header/iv match exactly and the reconstructed packet decrypts.
 - [ ] **Opaque codec round trip**: `encodeOpaquePacket` →
       `decodeOpaquePacket` reproduces the original packet exactly, and
       `decodeOpaquePacket` throws (doesn't silently return garbage) on
       non-base64 or non-JSON-after-unmasking input.
+- [ ] **Binary opaque codec round trip**: `encodeOpaquePacketBinary` →
+      `decodeOpaquePacketBinary` reproduces the original packet exactly, and
+      `decodeOpaquePacketBinary` throws on non-binary or truncated input.
 - [ ] **`unmaskBytes(maskBytes(x)) === x`** for representative lengths,
       including a length that isn't a multiple of 4 (exercises the
       tail-bytes-are-XOR-only path) and the empty buffer, whenever the
@@ -290,8 +302,9 @@ shipping a UI or large-file change:
       believable percentage.
 - [ ] Encrypt/decrypt a file above `STREAMING_EXPORT_THRESHOLD` (~200MB,
       or temporarily lower the constant for testing) — Export should
-      produce a `.scl` file via the streaming path, and importing it back
-      should work via `streamingParseLargeFile`.
+      produce a `.scb` binary file via the streaming path, and importing it
+      back should work via `streamingParseLargeBinaryFile`. Also verify
+      importing a legacy `.scl` text file still works.
 - [ ] Toggle light/dark theme with each of the above open — check the
       progress indicator, danger-red crossout icon, and all panels render
       correctly in both.

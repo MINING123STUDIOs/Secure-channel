@@ -67,6 +67,7 @@
     <div class="btnrow">
       <button class="iconbtn" onclick="copyBox('pubKey')" title="Copy">📋 Copy</button>
       <button class="iconbtn" onclick="exportTextBox('pubKey','my-public-key.txt')" title="Export as file">⬇️ Export</button>
+      <button class="iconbtn clear-btn" onclick="clearInputField('pubKey')" title="Clear">✕ Clear</button>
     </div>
     <div class="small">Fingerprint (yours):</div>
     <div class="fingerprint" id="myFingerprint">Generate keys to see this</div>
@@ -79,6 +80,7 @@
       <button class="iconbtn" onclick="togglePriv()" title="Show/hide"><span class="eye-icon" id="eyeIcon">👁️</span> <span id="toggleLabel">Show</span></button>
       <button class="iconbtn" onclick="copyBox('privKey')" title="Copy">📋 Copy</button>
       <button class="iconbtn" onclick="exportTextBox('privKey','my-private-key.txt', true)" title="Export as file">⬇️ Export</button>
+      <button class="iconbtn clear-btn" onclick="clearInputField('privKey')" title="Clear">✕ Clear</button>
     </div>
   </div>
 </div>
@@ -92,8 +94,10 @@
     <textarea id="peerKey" placeholder="Paste peer public key"></textarea>
     <div class="btnrow">
       <button class="iconbtn" onclick="copyBox('peerKey')" title="Copy">📋 Copy</button>
+      <button class="iconbtn paste-btn" onclick="pasteInputField('peerKey')" title="Paste from clipboard">📋 Paste</button>
       <button class="iconbtn" onclick="exportTextBox('peerKey','peer-public-key.txt')" title="Export as file">⬇️ Export</button>
       <button class="iconbtn" onclick="importIntoTextarea('peerKey')" title="Import from file">⬆️ Import</button>
+      <button class="iconbtn clear-btn" onclick="clearInputField('peerKey')" title="Clear">✕ Clear</button>
     </div>
     <div class="small">Fingerprint (peer's), once entered:</div>
     <div class="fingerprint" id="peerFingerprint">Paste a peer key to see this</div>
@@ -123,8 +127,10 @@
       <textarea id="msg" placeholder="Type a message, or import any file below (text, image, anything)..."></textarea>
       <div class="btnrow">
         <button class="iconbtn" onclick="copyBox('msg')" title="Copy">📋 Copy</button>
+        <button class="iconbtn paste-btn" onclick="pasteInputField('msg')" title="Paste from clipboard">📋 Paste</button>
         <button class="iconbtn" onclick="exportMsgBox()" title="Export">⬇️ Export</button>
-        <button class="iconbtn" onclick="importMsgBox()" title="Import any file">⬆️ Import file</button>
+        <button class="iconbtn" onclick="importMsgBox()" title="Import any file">⬆️ Import</button>
+        <button class="iconbtn clear-btn" onclick="clearInputField('msg')" title="Clear">✕ Clear</button>
       </div>
     </div>
     <button onclick="doEncrypt()">🚀 Encrypt</button>
@@ -143,8 +149,10 @@
       <textarea id="cipherIn" placeholder="Paste encrypted message"></textarea>
       <div class="btnrow">
         <button class="iconbtn" onclick="copyBox('cipherIn')" title="Copy">📋 Copy</button>
+        <button class="iconbtn paste-btn" onclick="pasteInputField('cipherIn')" title="Paste from clipboard">📋 Paste</button>
         <button class="iconbtn" onclick="exportTextBox('cipherIn','encrypted-message.bin')" title="Export">⬇️ Export</button>
         <button class="iconbtn" onclick="importIntoTextarea('cipherIn')" title="Import">⬆️ Import</button>
+        <button class="iconbtn clear-btn" onclick="clearInputField('cipherIn')" title="Clear">✕ Clear</button>
       </div>
     </div>
     <button onclick="doDecrypt()">🧪 Decrypt</button>

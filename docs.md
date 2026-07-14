@@ -133,6 +133,10 @@ prefix that anyone who's seen a JWT recognizes on sight.
 
 Instead, `encodeOpaquePacket()` / `decodeOpaquePacket()` run the packet
 bytes through `maskBytes()` / `unmaskBytes()`, then base64-encode/decode.
+For file exports, `encodeOpaquePacketBinary()` / `decodeOpaquePacketBinary()`
+produce/consume raw masked bytes (not base64), prefixed with a 4-byte magic
+(`SCBN`), so exported files are compact binary blobs instead of ASCII text.
+Clipboard copy/paste still uses the base64 text form.
 Internally that's a single "layer" (XOR keystream + chained ARX mix)
 applied **twice**, with a full bit-reversal of the buffer in between —
 `maskBytesOnce → reverseBitOrder → maskBytesOnce → reverseBitOrder` —
@@ -193,8 +197,9 @@ anyone with this source can regenerate the exact same streams. That's
 expected and fine — it's cosmetic camouflage, not a security boundary.
 The output is a single blob of base64-looking noise with no visible
 braces, quotes, or field names. It's what you see in the **Encrypt**
-output box, what gets copied to the clipboard, and what gets written to
-`encrypted-message.bin` on Export.
+output box and what gets copied to the clipboard. File Export writes
+raw binary bytes (prefixed with a 4-byte magic signature) instead of
+base64 text, for compactness.
 
 > **Breaking change:** because the masking algorithm changed, a masked
 > blob or `.scl` file exported before this change will not decode with
@@ -237,17 +242,25 @@ in-browser test suite in dev.md §6, since it only needs `constants.js`):
 
 ### 3.2 Large-file streaming format
 
-Files large enough to bypass in-memory JSON entirely (see §4) are written
-line-by-line to a `.scl` file instead. That format now uses:
+Files large enough to bypass in-memory JSON entirely (see §4) are exported
+in a binary format instead. There are two parallel formats:
 
-- a fixed, non-descriptive magic token (`LARGE_FORMAT_MAGIC`) instead of the
-  old literal string `"SECURE-CHANNEL-LARGE-V1"`, and
-- the header line masked and base64-encoded the same way as §3.1
-  (`maskBytes()` on export, `unmaskBytes()` on import), instead of being
-  raw, human-readable JSON.
+**Legacy text format (`.scl`):** A line-based text file with a fixed magic
+token (`LARGE_FORMAT_MAGIC`), a masked+base64 header, base64 IV, chunk
+count, and base64 ciphertext chunks. Still supported on import for
+backward compatibility.
 
-The iv, chunk count, and ciphertext chunk lines are already base64 and
-weren't changed — they didn't carry a recognizable signature to begin with.
+**Current binary format (`.scb`):** A compact binary file used for all new
+exports. The structure is:
+
+- 4-byte magic: `SCBN` (small, ≤200MB) or `SCBL` (large, >200MB)
+- For small: raw masked bytes (same as §3.1 but without base64)
+- For large: 4-byte header length + masked header bytes + 12-byte raw IV
+  + 4-byte chunk count + per-chunk: 4-byte length + raw ciphertext bytes
+
+Import auto-detects the format by reading the first 4 bytes. Clipboard
+copy/paste always uses the base64 text form (`encodeOpaquePacket`/
+`decodeOpaquePacket`), not the binary form.
 
 ---
 
@@ -263,12 +276,14 @@ explained in the comment block at the top of `js/constants.js`:
    (`dataChunks`), never joined into one string.
 2. **Chunking alone isn't enough** — `JSON.stringify()` on the whole packet
    still produces one final string. Above `STREAMING_EXPORT_THRESHOLD`
-   (200MB), Export bypasses `JSON.stringify` entirely: chunk strings are
+   (200MB), Export bypasses `JSON.stringify` entirely: raw binary chunks are
    handed directly to `new Blob([...parts])`, which concatenates at the
    Blob level without ever forming one oversized JS string
-   (`buildLargeExportParts`). Import mirrors this: `streamingParseLargeFile`
-   reads the file in fixed windows via `File.slice()`, never via a
-   whole-file `.text()` call.
+   (`buildLargeExportPartsBinary`). Import mirrors this:
+   `streamingParseLargeBinaryFile` reads the file in fixed windows via
+   `File.slice()`, never via a whole-file `.text()` call. The legacy text
+   `.scl` format (`buildLargeExportParts`/`streamingParseLargeFile`) is still
+   supported on import for backward compatibility.
 3. Separately, dumping many MB of text into a `<pre>`/`<textarea>` makes
    real browsers sluggish. Above `DISPLAY_THRESHOLD` (1MB), the UI shows a
    short summary instead ("Encrypted — approx. 42.1 MB..."), while the real
@@ -279,7 +294,8 @@ explained in the comment block at the top of `js/constants.js`:
 |---|---|---|
 | `SPINNER_THRESHOLD` | 512 KB | Above this, the progress indicator appears for encrypt/decrypt/read/import. |
 | `DISPLAY_THRESHOLD` | 1 MB | Above this, the UI shows a summary instead of the full text/ciphertext. |
-| `STREAMING_EXPORT_THRESHOLD` | 200 MB | Above this, Export/Import use the line-based streaming `.scl` format instead of one JSON/base64 blob. |
+| `STREAMING_EXPORT_THRESHOLD` | 200 MB | Above this, Export uses the binary streaming `.scb` format instead of one binary blob. |
+| `LARGE_IMPORT_CONFIRM_THRESHOLD` | 300 MB | Above this, Import shows a confirmation warning before loading (may crash browser). |
 | `CHUNK_BYTES` | 64 MB | Size of each raw chunk before base64-encoding. |
 | `IMPORT_WINDOW` | 32 MB | Read window size when streaming-importing a large file. |
 | `MAX_SKIP` | 1000 | Max out-of-order messages skippable in one jump. |
@@ -364,7 +380,8 @@ that file was already organized into internally:
 - **`constants.js`** — thresholds (§4 table), `yieldToUI`, the envelope
   obfuscation layer (`maskBytes`/`unmaskBytes`/`maskBytesOnce`/
   `unmaskBytesOnce`/`reverseBitOrder`/`arxMixWords`/
-  `fillPseudorandomStream`/`encodeOpaquePacket`/`decodeOpaquePacket`, §3.1),
+  `fillPseudorandomStream`/`encodeOpaquePacket`/`decodeOpaquePacket`/`encodeOpaquePacketBinary`/`decodeOpaquePacketBinary`, §3.1),
+  binary format magic constants (`BIN_MAGIC_SMALL`/`BIN_MAGIC_LARGE`),
   and base64/byte utilities (`b64`, `unb64`, `bytesEqual`, `compareBytes`,
   `concatBytes`). No dependencies on the other three files.
 - **`crypto-core.js`** — `generateIdentityKeyPair`, `generateDHKeyPair`,
@@ -373,9 +390,10 @@ that file was already organized into internally:
   (`encrypt`/`decrypt`) described in §2. Depends on `constants.js` for the
   byte helpers and `MAX_SKIP`/`MAX_SKIPPED_KEYS`.
 - **`large-payload.js`** — `bytesToBase64Chunks`/`base64ChunksToBytes`,
-  `buildLargeExportParts`/`streamingParseLargeFile` (§3.2, §4). Depends on
-  `constants.js` (`yieldToUI`, `maskBytes`/`unmaskBytes`, thresholds); does
-  not depend on `crypto-core.js`.
+  `buildLargeExportParts`/`streamingParseLargeFile` (legacy text `.scl` format),
+  `buildLargeExportPartsBinary`/`streamingParseLargeBinaryFile` (current binary `.scb` format, §3.2, §4).
+  Depends on `constants.js` (`yieldToUI`, `maskBytes`/`unmaskBytes`, thresholds,
+  binary magic constants); does not depend on `crypto-core.js`.
 - **`ui.js`** — session state (`kp`, `session`, etc.), theme toggle, the
   `Progress` indicator module, status/copy/export/import helpers, key
   generation & identity import/export, the show/hide toggle, and the

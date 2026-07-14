@@ -67,7 +67,7 @@
 
 body {
   margin: 0;
-  font-family: system-ui, Arial;
+  font-family: "Noto Sans", system-ui, Arial, sans-serif;
   background: var(--bg);
   color: var(--text);
   transition: background 0.15s ease, color 0.15s ease;
@@ -94,7 +94,7 @@ a:visited {
 }
 
 h1, h2, h3 {
-  font-family: system-ui, Arial;
+  font-family: "Noto Sans", system-ui, Arial, sans-serif;
   margin: 0;
 }
 
@@ -141,6 +141,30 @@ pre {
 
   overflow-wrap: anywhere;
   word-break: break-word;
+}
+
+/* Clear button for input fields */
+.clear-btn {
+  background: var(--iconbtn-bg);
+  color: var(--text);
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.clear-btn:hover {
+  background: var(--danger);
+  color: white;
+}
+
+/* Paste button for input fields */
+.paste-btn {
+  background: var(--iconbtn-bg);
+  color: var(--text);
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.paste-btn:hover {
+  background: var(--success);
+  color: white;
 }
 
 pre {
@@ -208,7 +232,7 @@ button:disabled {
 .small {
   font-size: 12px;
   color: var(--muted);
-  font-family: system-ui, Arial;
+  font-family: "Noto Sans", system-ui, Arial, sans-serif;
 }
 
 .iconbtn {
@@ -226,6 +250,31 @@ button:disabled {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
+}
+
+.confirm-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.confirm-row .confirm-yes {
+  background: var(--accent);
+  color: white;
+}
+.confirm-row .confirm-yes:hover {
+  background: var(--accent-hover);
+}
+
+.confirm-row .confirm-no {
+  background: transparent;
+  border: 1px solid var(--danger);
+  color: var(--danger);
+}
+.confirm-row .confirm-no:hover {
+  background: var(--danger);
+  color: white;
 }
 
 .danger-btn {
@@ -321,7 +370,7 @@ footer {
   transition: opacity 0.25s cubic-bezier(0.22, 1, 0.36, 1),
               transform 0.25s cubic-bezier(0.22, 1, 0.36, 1);
   z-index: 999;
-  font-family: system-ui, Arial;
+  font-family: "Noto Sans", system-ui, Arial, sans-serif;
 }
 #progressOverlay.visible {
   opacity: 1;
