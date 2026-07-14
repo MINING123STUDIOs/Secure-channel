@@ -33,7 +33,10 @@ without an explicit, deliberate decision (and a note in `docs.md`):
   that copies, exports, or reveals the private key must continue to go
   through `confirmPrivateKeyExposure()` (or an equivalent explicit
   confirmation). Don't add a new export/copy/display path for the private
-  key that skips it.
+  key that skips it. All confirmations use `showConfirmWarning()` for an
+  inline UI (no browser `confirm()` dialogs). When a new confirmation is
+  triggered on the same output element, the previous one is automatically
+  cancelled (resolved as `false`).
 - **GPL-3.0 headers stay on every source file**, including any new ones.
 
 ---
@@ -172,8 +175,9 @@ gets extra scrutiny. Specifically:
   treatment as encrypt/decrypt: yield periodically, and show the
   `Progress` indicator above `SPINNER_THRESHOLD`.
 - **Every private-key-revealing action needs a visible, honest warning**
-  (see §1) — don't rely on the confirm dialog alone; the private key field
-  itself should stay masked by default on every code path.
+  (see §1) — use `showConfirmWarning()` for inline UI (not browser
+  `confirm()`); the private key field itself should stay masked by default
+  on every code path.
 
 ---
 
@@ -310,6 +314,11 @@ shipping a UI or large-file change:
       correctly in both.
 - [ ] Copy-to-clipboard and Export for both `cipherOut` and `plainOut`,
       including the size-limit warnings for clipboard on large content.
+- [ ] Private key actions (Show/Hide, Copy, Export, Export Identity) each
+      show an inline confirmation in `privKeyOut` (no browser `confirm()`).
+      Triggering a second confirmation on the same output element should
+      cancel the first one. Reset Session also shows an inline confirmation
+      in `cipherOut`.
 - [ ] Resize to a mobile-width viewport — the `.row` two-column layout
       should collapse to one column (`@media (max-width: 800px)`).
 - [ ] With OS-level "reduce motion" enabled, confirm the progress

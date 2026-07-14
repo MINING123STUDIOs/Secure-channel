@@ -319,8 +319,9 @@ on very large files.
 
 1. **Generate Key Pair.** Creates your identity key pair. Your public key
    (safe to share) and its fingerprint appear immediately; your private key
-   is hidden behind a password field — click **Show** (with a confirmation
-   prompt) to reveal it, or **Copy**/**Export** it (also confirmed).
+   is hidden behind a password field — click **Show** (with an inline
+   confirmation) to reveal it, or **Copy**/**Export** it (also confirmed).
+   A new confirmation on the same output area cancels the previous one.
 2. **Share only your public key** with your contact, and paste theirs into
    **Peer's public key**. Both of you do this once.
 3. **Create Shared Secret.** Derives the session. The status line and the
@@ -340,7 +341,8 @@ on very large files.
    pick a conversation back up after refreshing the page, since nothing
    else is persisted.
 7. **Reset Session** clears the current shared secret and any pending
-   encrypt/decrypt state without touching your identity keys.
+   encrypt/decrypt state without touching your identity keys (with an
+   inline confirmation first).
 
 Refreshing or closing the page erases everything (keys, session, all of
 it) — there's no account and no cloud backup. Once you've generated keys,
@@ -355,10 +357,11 @@ safety net.
 Structure only: the info panel, the four numbered panels (Key Generation,
 Shared Secret, Encrypt, Decrypt), and the footer. All interactivity is
 wired via `onclick` handlers calling into the `js/` scripts. Note that
-`cipherOut` and `plainOut` are *result* boxes — they only get Copy/Export
-controls, not Import, since importing a file into an output space doesn't
-make sense. Only genuine input fields (`peerKey`, `msg`, `cipherIn`, plus
-the identity-level Import Identity) offer Import.
+`cipherOut`, `plainOut`, and `privKeyOut` are *result* boxes — they only
+get Copy/Export controls (or inline confirmations), not Import, since
+importing a file into an output space doesn't make sense. Only genuine
+input fields (`peerKey`, `msg`, `cipherIn`, plus the identity-level
+Import Identity) offer Import.
 
 ### `style.css`
 CSS custom properties (`:root` / `[data-theme="light"]`) drive both the

@@ -21,7 +21,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
-<title>🔐 Secure Channel Assistant v4</title>
+<title>Secure Channel Assistant v4</title>
 <link rel="stylesheet" href="style.css">
 </head>
 
@@ -67,7 +67,6 @@
     <div class="btnrow">
       <button class="iconbtn" onclick="copyBox('pubKey')" title="Copy">📋 Copy</button>
       <button class="iconbtn" onclick="exportTextBox('pubKey','my-public-key.txt')" title="Export as file">⬇️ Export</button>
-      <button class="iconbtn clear-btn" onclick="clearInputField('pubKey')" title="Clear">✕ Clear</button>
     </div>
     <div class="small">Fingerprint (yours):</div>
     <div class="fingerprint" id="myFingerprint">Generate keys to see this</div>
@@ -80,8 +79,8 @@
       <button class="iconbtn" onclick="togglePriv()" title="Show/hide"><span class="eye-icon" id="eyeIcon">👁️</span> <span id="toggleLabel">Show</span></button>
       <button class="iconbtn" onclick="copyBox('privKey')" title="Copy">📋 Copy</button>
       <button class="iconbtn" onclick="exportTextBox('privKey','my-private-key.txt', true)" title="Export as file">⬇️ Export</button>
-      <button class="iconbtn clear-btn" onclick="clearInputField('privKey')" title="Clear">✕ Clear</button>
     </div>
+    <pre id="privKeyOut"></pre>
   </div>
 </div>
 
@@ -167,7 +166,7 @@
 
 </div>
 
-<footer>© MINING123STUDIOS 2026 | Licensed under GPL-3.0<br>This software is provided "as is", without warranty of any kind, express or implied.<br>In no event shall the authors be liable for any claim, damages or other liability.<br><a href="https://github.com/MINING123STUDIOs/Secure-channel/tree/main">Source Code (Github)</a></footer>
+<footer>© MINING123STUDIOS 2026 &middot; Licensed under GPL-3.0<br>This software is provided "as is", without warranty of any kind, express or implied.<br>In no event shall the authors be liable for any claim, damages or other liability.<br><a href="https://github.com/MINING123STUDIOs/Secure-channel/tree/main">Source Code (Github)</a></footer>
 
 </div>
 
