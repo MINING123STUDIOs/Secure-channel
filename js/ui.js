@@ -35,7 +35,7 @@ let lastDecrypted = null;       // { bytes: Uint8Array, fileMeta: {name,type}|nu
 function applyTheme(theme){
   document.documentElement.setAttribute('data-theme', theme);
   const btn = document.getElementById('themeToggleBtn');
-  btn.textContent = theme === 'light' ? '☀️ Light' : '🌙 Dark';
+  btn.textContent = theme === 'light' ? LABEL_THEME_LIGHT : LABEL_THEME_DARK;
 }
 function toggleTheme(){
   const current = document.documentElement.getAttribute('data-theme') || 'dark';
@@ -86,7 +86,7 @@ const Progress = (() => {
     ensure();
     ring.classList.remove('determinate');
     ring.style.setProperty('--pct', 25);
-    labelEl.textContent = label || 'Working…';
+    labelEl.textContent = label || PROGRESS_WORKING;
     pctEl.textContent = '';
     el.classList.add('visible');
     visible = true;
@@ -123,11 +123,10 @@ function setStatus(text){
 async function confirmPrivateKeyExposure(action, outEl){
   return showConfirmWarning(
     outEl,
-    `⚠️ You're about to ${action} your PRIVATE key. ` +
-    `Anyone who obtains it can read your messages and impersonate you. ` +
-    `Only continue if you're sure of where it's going (or who's looking at your screen).`,
-    '✅ Continue',
-    '❌ Cancel'
+    CONFIRM_PRIVKEY_EXPOSURE(action),
+    BTN_CONTINUE,
+    BTN_CANCEL,
+    PRIVKEY_CONFIRM_TIMEOUT
   );
 }
 
@@ -193,22 +192,21 @@ async function pasteInputField(id) {
     }
   } catch(e) {
     console.error('Paste failed:', e);
-    showInlineMessage(document.getElementById("cipherOut"), "⚠️ Could not read from clipboard. Please paste manually.");
+    showInlineMessage(document.getElementById("cipherOut"), MSG_CLIPBOARD_FAILED);
   }
 }
 
 /* ---------- Large file import confirmation ---------- */
 
 function showLargeImportWarning(outEl, file, onConfirm){
-  outEl.textContent = `⚠️ File is ${formatBytes(file.size)} — too large to import safely. The browser may crash or become unresponsive.`;
+  outEl.textContent = CONFIRM_LARGE_IMPORT(formatBytes(file.size));
   const row = document.createElement('div');
   row.className = 'confirm-row';
   const yes = document.createElement('button');
-  yes.className = 'confirm-yes';
-  yes.textContent = '✅ Import anyway';
+  yes.textContent = BTN_IMPORT_ANYWAY;
   const no = document.createElement('button');
-  no.className = 'confirm-no';
-  no.textContent = '❌ Cancel';
+  no.className = 'danger-btn';
+  no.textContent = BTN_CANCEL;
   function cleanup(){ row.remove(); outEl.textContent = ''; }
   yes.onclick = () => { cleanup(); onConfirm(file); };
   no.onclick = cleanup;
@@ -224,7 +222,7 @@ function showLargeImportWarning(outEl, file, onConfirm){
    it as false AND removes the old DOM elements synchronously. */
 const _activeConfirms = new Map();
 
-function showConfirmWarning(outEl, message, yesLabel, noLabel){
+function showConfirmWarning(outEl, message, yesLabel, noLabel, timeout){
   /* cancel any previous confirmation on this same element */
   if(_activeConfirms.has(outEl)){
     const prev = _activeConfirms.get(outEl);
@@ -236,15 +234,15 @@ function showConfirmWarning(outEl, message, yesLabel, noLabel){
     const row = document.createElement('div');
     row.className = 'confirm-row';
     const yes = document.createElement('button');
-    yes.className = 'confirm-yes';
-    yes.textContent = yesLabel || '✅ Continue';
+    yes.textContent = yesLabel || BTN_CONTINUE;
     const no = document.createElement('button');
-    no.className = 'confirm-no';
-    no.textContent = noLabel || '❌ Cancel';
-    function cleanup(){ row.remove(); outEl.textContent = ''; _activeConfirms.delete(outEl); }
+    no.className = 'danger-btn';
+    no.textContent = noLabel || BTN_CANCEL;
+    function cleanup(){ row.remove(); outEl.textContent = ''; _activeConfirms.delete(outEl); if(timer) clearTimeout(timer); }
     _activeConfirms.set(outEl, { resolve, cleanup });
     yes.onclick = () => { cleanup(); resolve(true); };
     no.onclick = () => { cleanup(); resolve(false); };
+    const timer = timeout ? setTimeout(() => { cleanup(); resolve(false); }, timeout) : null;
     row.appendChild(yes);
     row.appendChild(no);
     outEl.parentElement.insertBefore(row, outEl.nextSibling);
@@ -275,22 +273,22 @@ function estimateChunksByteLength(chunks){
 
 async function copyBox(id){
   if(id === 'cipherOut'){
-    if(!lastEncryptedPacket){ showInlineMessage(document.getElementById("cipherOut"), "⚠️ Nothing here to copy yet"); return; }
+    if(!lastEncryptedPacket){ showInlineMessage(document.getElementById("cipherOut"), MSG_NOTHING_TO_COPY); return; }
     if(estimateChunksByteLength(lastEncryptedPacket.dataChunks) > STREAMING_EXPORT_THRESHOLD){
-      showInlineMessage(document.getElementById("cipherOut"), "⚠️ This message is too large to copy to the clipboard. Use Export below to save it as a file instead.");
+      showInlineMessage(document.getElementById("cipherOut"), MSG_TOO_LARGE_TO_COPY);
       return;
     }
     navigator.clipboard.writeText(await encodeOpaquePacket(lastEncryptedPacket));
     return;
   }
   if(id === 'plainOut'){
-    if(!lastDecrypted){ showInlineMessage(document.getElementById("plainOut"), "⚠️ Nothing decrypted yet"); return; }
+    if(!lastDecrypted){ showInlineMessage(document.getElementById("plainOut"), MSG_NOTHING_DECRYPTED); return; }
     if(lastDecrypted.fileMeta){
-      showInlineMessage(document.getElementById("plainOut"), "This decrypted content is a file — use Export below to save it, not Copy.");
+      showInlineMessage(document.getElementById("plainOut"), MSG_FILE_USE_EXPORT);
       return;
     }
     if(lastDecrypted.bytes.length > STREAMING_EXPORT_THRESHOLD){
-      showInlineMessage(document.getElementById("plainOut"), "⚠️ This message is too large to copy to the clipboard. Use Export below to save it as a file instead.");
+      showInlineMessage(document.getElementById("plainOut"), MSG_TOO_LARGE_TO_COPY);
       return;
     }
     navigator.clipboard.writeText(new TextDecoder().decode(lastDecrypted.bytes));
@@ -306,7 +304,7 @@ async function copyBox(id){
 
 async function exportTextBox(id, filename, isSensitive){
   if(id === 'cipherOut'){
-    if(!lastEncryptedPacket){ showInlineMessage(document.getElementById("cipherOut"), "⚠️ Nothing here to export yet"); return; }
+    if(!lastEncryptedPacket){ showInlineMessage(document.getElementById("cipherOut"), MSG_NOTHING_TO_EXPORT); return; }
     if(estimateChunksByteLength(lastEncryptedPacket.dataChunks) > STREAMING_EXPORT_THRESHOLD){
       const parts = await buildLargeExportPartsBinary(lastEncryptedPacket);
       downloadBlob(new Blob(parts, { type: 'application/octet-stream' }), filename.replace(/\.[^.]+$/, '.scb'));
@@ -317,7 +315,7 @@ async function exportTextBox(id, filename, isSensitive){
   }
   const el = document.getElementById(id);
   const text = el.value !== undefined ? el.value : el.textContent;
-  if(!text){ showInlineMessage(document.getElementById(id === 'privKey' ? 'privKeyOut' : id), "⚠️ Nothing here to export yet"); return; }
+  if(!text){ showInlineMessage(document.getElementById(id === 'privKey' ? 'privKeyOut' : id), MSG_NOTHING_TO_EXPORT); return; }
   if(isSensitive){
     if(!await confirmPrivateKeyExposure("export", document.getElementById("privKeyOut"))) return;
   }
@@ -330,7 +328,7 @@ async function importIntoTextareaProcess(id, file){
     if(file.size > DISPLAY_THRESHOLD){
       const showSpinner = file.size > SPINNER_THRESHOLD;
       try {
-        if(showSpinner) Progress.show('Reading file…');
+        if(showSpinner) Progress.show(PROGRESS_READING);
 
         // Peek at the first bytes to detect format
         const magicSlice = await file.slice(0, 4).arrayBuffer();
@@ -344,7 +342,7 @@ async function importIntoTextareaProcess(id, file){
         } else if(isBinLarge){
           pendingDecryptPacket = await streamingParseLargeBinaryFile(
             file, undefined,
-            showSpinner ? (f) => Progress.update(f, 'Reading file…') : null
+            showSpinner ? (f) => Progress.update(f, PROGRESS_READING) : null
           );
         } else {
           // Not binary — try text formats (old .scl or base64)
@@ -352,12 +350,10 @@ async function importIntoTextareaProcess(id, file){
           if(magicPeek.startsWith(LARGE_FORMAT_MAGIC)){
             pendingDecryptPacket = await streamingParseLargeFile(
               file, undefined,
-              showSpinner ? (f) => Progress.update(f, 'Reading file…') : null
+              showSpinner ? (f) => Progress.update(f, PROGRESS_READING) : null
             );
           } else if(file.size > STREAMING_EXPORT_THRESHOLD){
-            document.getElementById('cipherIn').value =
-              `⚠️ This file is ${formatBytes(file.size)} and isn't in this tool's format — ` +
-              `it may fail to load. If it came from this tool's Export, that's unexpected; otherwise it wasn't meant for direct import this large.`;
+            document.getElementById('cipherIn').value = MSG_WRONG_FORMAT_LARGE(formatBytes(file.size));
             return;
           } else {
             pendingDecryptPacket = await decodeOpaquePacket(await file.text());
@@ -365,13 +361,12 @@ async function importIntoTextareaProcess(id, file){
         }
       } catch(e){
         console.error(e);
-        document.getElementById('cipherIn').value = `❌ Couldn't read ${file.name} as an encrypted message (see console).`;
+        document.getElementById('cipherIn').value = MSG_CANT_READ_CIPHER_FILE(file.name);
         return;
       } finally {
         if(showSpinner) Progress.hide();
       }
-      document.getElementById('cipherIn').value =
-        `📎 Imported: ${file.name} (${formatBytes(file.size)}) — click Decrypt to process it, or edit/paste here to replace it.`;
+      document.getElementById('cipherIn').value = MSG_CIPHER_IMPORTED(file.name, formatBytes(file.size));
       return;
     }
   }
@@ -421,11 +416,11 @@ async function generateKeys(){
   document.getElementById("privKey").value = b64(privRaw);
   await updateMyFingerprint();
 
-  setStatus("✅ Keys generated. Awaiting peer...");
+  setStatus(STATUS_KEYS_GENERATED);
 }
 
 async function exportIdentity(){
-  if(!kp){ showInlineMessage(document.getElementById("privKeyOut"), "⚠️ Generate a key pair first"); return; }
+  if(!kp){ showInlineMessage(document.getElementById("privKeyOut"), MSG_GENERATE_KEYS_FIRST); return; }
   if(!await confirmPrivateKeyExposure("export (as part of your identity backup)", document.getElementById("privKeyOut"))) return;
   const privRaw = new Uint8Array(await crypto.subtle.exportKey("pkcs8", kp.privateKey));
   const payload = {
@@ -434,14 +429,25 @@ async function exportIdentity(){
     publicKey: b64(myPubRaw),
     privateKey: b64(privRaw)
   };
-  downloadBlob(new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' }), 'secure-channel-identity.json');
+  const bytes = await encodeIdentityBytes(payload);
+  downloadBlob(new Blob([bytes], { type: 'application/octet-stream' }), 'secure-channel-identity.scid');
 }
 
 async function importIdentity(){
-  const file = await pickFile('application/json');
+  const file = await pickFile('.scid,.json');
   if(!file) return;
   try {
-    const obj = JSON.parse(await file.text());
+    let obj;
+    const magicSlice = await file.slice(0, 4).arrayBuffer();
+    const magicBytes = new Uint8Array(magicSlice);
+
+    if(bytesEqual(magicBytes, ID_MAGIC)){
+      const fullBytes = new Uint8Array(await file.arrayBuffer());
+      obj = await decodeIdentityBytes(fullBytes);
+    } else {
+      obj = JSON.parse(await file.text());
+    }
+
     if(!obj.publicKey || !obj.privateKey) throw new Error("missing fields");
 
     const privBytes = unb64(obj.privateKey);
@@ -457,12 +463,14 @@ async function importIdentity(){
     document.getElementById("privKey").value = obj.privateKey;
     await updateMyFingerprint();
 
-    setStatus("✅ Identity restored. Awaiting peer...");
+    setStatus(STATUS_IDENTITY_RESTORED);
   } catch(e){
     console.error(e);
-    showInlineMessage(document.getElementById("cipherOut"), "⚠️ That file doesn't look like a valid identity backup.");
+    showInlineMessage(document.getElementById("cipherOut"), MSG_INVALID_IDENTITY_FILE);
   }
 }
+
+let _privKeyAutohideTimer = null;
 
 // Show/Hide toggle: swaps the field type, the button label, and marks
 // the eye icon with a diagonal strike-through while the key is visible.
@@ -474,11 +482,19 @@ async function togglePriv(){
     if(!await confirmPrivateKeyExposure("reveal", document.getElementById("privKeyOut"))) return;
     el.type = "text";
     icon.classList.add("crossed");
-    label.textContent = "Hide";
+    label.textContent = LABEL_HIDE;
+    if(_privKeyAutohideTimer) clearTimeout(_privKeyAutohideTimer);
+    _privKeyAutohideTimer = setTimeout(() => {
+      el.type = "password";
+      icon.classList.remove("crossed");
+      label.textContent = LABEL_SHOW;
+      _privKeyAutohideTimer = null;
+    }, PRIVKEY_AUTOHIDE_TIMEOUT);
   } else {
     el.type = "password";
     icon.classList.remove("crossed");
-    label.textContent = "Show";
+    label.textContent = LABEL_SHOW;
+    if(_privKeyAutohideTimer){ clearTimeout(_privKeyAutohideTimer); _privKeyAutohideTimer = null; }
   }
 }
 
@@ -487,19 +503,19 @@ async function togglePriv(){
 async function updatePeerFingerprint(){
   const raw = document.getElementById("peerKey").value.trim().replace(/\s+/g, "");
   const el = document.getElementById("peerFingerprint");
-  if(!raw){ el.textContent = "Paste a peer key to see this"; return; }
+  if(!raw){ el.textContent = MSG_PASTE_PEER_KEY_FIRST; return; }
   try {
     const bytes = unb64(raw);
     el.textContent = await fingerprintOf(bytes);
   } catch(e){
-    el.textContent = "⚠️ Can't read this as a key yet";
+    el.textContent = MSG_CANT_READ_PEER_KEY;
   }
 }
 document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('peerKey').addEventListener('input', updatePeerFingerprint);
   document.getElementById('msg').addEventListener('input', function(){
     pendingAttachment = null;
-    if(this.value === '⚠️ Nothing here to export yet') this.value = '';
+    if(this.value === MSG_NOTHING_TO_EXPORT) this.value = '';
   });
   document.getElementById('cipherIn').addEventListener('input', () => { pendingDecryptPacket = null; });
 });
@@ -507,13 +523,13 @@ document.addEventListener('DOMContentLoaded', () => {
 async function derive(){
   try {
     if(!kp){
-      setStatus("⚠️ Generate your key pair first");
+      setStatus(STATUS_GENERATE_FIRST);
       return;
     }
 
     const raw = document.getElementById("peerKey").value.trim();
     if(!raw){
-      setStatus("⚠️ Paste a peer public key first");
+      setStatus(STATUS_PASTE_PEER_KEY);
       return;
     }
     const peerText = raw.replace(/\s+/g, "");
@@ -523,12 +539,12 @@ async function derive(){
       peerPubRaw = unb64(peerText);
       await importPub(peerPubRaw); // validates it's actually a usable EC public key
     } catch(e){
-      setStatus("⚠️ That doesn't look like a valid public key — check for missing characters or extra text");
+      setStatus(STATUS_INVALID_PEER_KEY);
       return;
     }
 
     if(compareBytes(myPubRaw, peerPubRaw) === 0){
-      setStatus("⚠️ That's your own public key, not a peer's — you need a key from the other person");
+      setStatus(STATUS_OWN_KEY);
       return;
     }
 
@@ -540,28 +556,28 @@ async function derive(){
     document.getElementById("sessionFingerprintField").style.display = "";
     await updatePeerFingerprint();
 
-    setStatus("🔐 Secure session established. You can " + (session.CKs ? "send right away." : "reply once your peer sends the first message."));
+    setStatus(STATUS_SESSION_ESTABLISHED(!!session.CKs));
   } catch(e){
     console.error("DERIVE ERROR:", e);
-    setStatus("❌ Couldn't set up the session (see browser console for details). Double-check the pasted key and try again.");
+    setStatus(STATUS_SESSION_FAILED);
   }
 }
 
 async function resetSessionUI(){
   if(!session){
-    setStatus("Nothing to reset — no session is active.");
+    setStatus(STATUS_NOTHING_TO_RESET);
     return;
   }
   if(!await showConfirmWarning(
     document.getElementById("cipherOut"),
-    "This will end the current secure session. You won't be able to decrypt any messages from this conversation afterward (though your keys stay intact). Continue?",
-    '✅ Reset session',
-    '❌ Cancel'
+    CONFIRM_SESSION_RESET,
+    BTN_RESET_SESSION,
+    BTN_CANCEL
   )){
     return;
   }
   resetTransientState();
-  setStatus("🔄 Session reset. Create a new shared secret to keep talking.");
+  setStatus(STATUS_SESSION_RESET);
 }
 
 /* ---------- Encrypt / Decrypt ---------- */
@@ -572,7 +588,7 @@ async function resetSessionUI(){
 async function doEncrypt(){
   const outEl = document.getElementById("cipherOut");
   if(!session){
-    outEl.textContent = "⚠️ No shared secret — set up a session first";
+    outEl.textContent = MSG_NO_SESSION;
     return;
   }
 
@@ -582,14 +598,14 @@ async function doEncrypt(){
     ? pendingAttachment.size > SPINNER_THRESHOLD
     : document.getElementById("msg").value.length > SPINNER_THRESHOLD;
 
-  if(willBeLarge) Progress.show('Reading file…');
+  if(willBeLarge) Progress.show(PROGRESS_READING);
 
   if(pendingAttachment){
     try {
       plaintextBytes = new Uint8Array(await pendingAttachment.file.arrayBuffer());
     } catch(e){
       console.error(e);
-      outEl.textContent = "❌ Couldn't read the attached file (see console).";
+      outEl.textContent = MSG_CANT_READ_FILE;
       if(willBeLarge) Progress.hide();
       return;
     }
@@ -598,32 +614,32 @@ async function doEncrypt(){
     const msgText = document.getElementById("msg").value;
     if(!msgText){
       if(willBeLarge) Progress.hide();
-      outEl.textContent = "⚠️ Nothing to encrypt — type a message or import a file first";
+      outEl.textContent = MSG_NOTHING_TO_ENCRYPT;
       return;
     }
     plaintextBytes = new TextEncoder().encode(msgText);
   }
 
   try {
-    if(willBeLarge) Progress.show('Encrypting…');
+    if(willBeLarge) Progress.show(PROGRESS_ENCRYPTING);
     const packet = await session.encrypt(
       plaintextBytes, extraHeader,
-      willBeLarge ? (f) => Progress.update(f, 'Encrypting…') : null
+      willBeLarge ? (f) => Progress.update(f, PROGRESS_ENCRYPTING) : null
     );
     lastEncryptedPacket = packet;
 
     if(plaintextBytes.length > DISPLAY_THRESHOLD){
       const approxCipherSize = estimateChunksByteLength(packet.dataChunks);
-      outEl.textContent = `🔒 Encrypted — approx. ${formatBytes(approxCipherSize)}. Too large to display here. Use Export or Copy below.`;
+      outEl.textContent = MSG_ENCRYPTED_LARGE(formatBytes(approxCipherSize));
     } else {
       outEl.textContent = await encodeOpaquePacket(packet);
     }
   } catch(e){
     console.error(e);
     if(e.message && e.message.includes("no sending chain")){
-      outEl.textContent = "⚠️ You can't send yet — your peer needs to send the first message in this session before you can reply. (Whoever's public key sorts first becomes the initiator and sends first.)";
+      outEl.textContent = MSG_CANT_SEND_YET;
     } else {
-      outEl.textContent = "❌ Encryption failed unexpectedly (see console).";
+      outEl.textContent = MSG_ENCRYPT_FAILED;
     }
   } finally {
     if(willBeLarge) Progress.hide();
@@ -638,33 +654,33 @@ async function doDecryptProcess(packet){
   const willBeLarge = approxSize > SPINNER_THRESHOLD;
 
   try {
-    if(willBeLarge) Progress.show('Decrypting…');
+    if(willBeLarge) Progress.show(PROGRESS_DECRYPTING);
     const plainBytes = await session.decrypt(
       packet,
-      willBeLarge ? (f) => Progress.update(f, 'Decrypting…') : null
+      willBeLarge ? (f) => Progress.update(f, PROGRESS_DECRYPTING) : null
     );
     const fileMeta = (packet.header && packet.header.file) ? packet.header.file : null;
     lastDecrypted = { bytes: plainBytes, fileMeta };
 
     if(fileMeta){
-      outEl.textContent = `🔓 [File: ${fileMeta.name} — ${formatBytes(plainBytes.length)}] Use Export below to save it.`;
+      outEl.textContent = MSG_DECRYPT_FILE_PROMPT(fileMeta.name, formatBytes(plainBytes.length));
     } else if(plainBytes.length > DISPLAY_THRESHOLD){
-      outEl.textContent = `🔓 Decrypted — ${formatBytes(plainBytes.length)} of text. Too large to display here. Use Export or Copy below.`;
+      outEl.textContent = MSG_DECRYPTED_LARGE(formatBytes(plainBytes.length));
     } else {
       outEl.textContent = "🔓 " + new TextDecoder().decode(plainBytes);
     }
   } catch(e){
     console.error("DECRYPT ERROR:", e);
     lastDecrypted = null;
-    let msg = "❌ Couldn't decrypt this message — ";
+    let msg = MSG_DECRYPT_FAILED;
     if(e.message && e.message.includes("unrecognized packet")){
-      msg += "it isn't in a format this tool recognizes (wrong version, or not from this tool at all).";
+      msg += MSG_DECRYPT_BAD_FORMAT;
     } else if(e.message && e.message.includes("malformed header")){
-      msg += "the message header is missing required fields.";
+      msg += MSG_DECRYPT_MISSING_FIELDS;
     } else if(e.message && e.message.includes("too many")){
       msg += e.message + ".";
     } else {
-      msg += "it may be corrupted, tampered with, encrypted for someone else, or already read.";
+      msg += MSG_DECRYPT_CORRUPTED;
     }
     outEl.textContent = msg;
   } finally {
@@ -675,7 +691,7 @@ async function doDecryptProcess(packet){
 async function doDecrypt(){
   const outEl = document.getElementById("plainOut");
   if(!session){
-    outEl.textContent = "⚠️ No shared secret — set up a session first";
+    outEl.textContent = MSG_NO_SESSION;
     return;
   }
 
@@ -684,7 +700,7 @@ async function doDecrypt(){
     try {
       packet = await decodeOpaquePacket(document.getElementById("cipherIn").value);
     } catch(e){
-      outEl.textContent = "❌ That doesn't look like a valid encrypted message — check you copied the whole thing.";
+      outEl.textContent = MSG_INVALID_CIPHER;
       return;
     }
   }
@@ -705,8 +721,7 @@ async function doDecrypt(){
 
 function importMsgBoxAttach(file){
   pendingAttachment = { file, name: file.name, type: file.type || 'application/octet-stream', size: file.size };
-  document.getElementById('msg').value =
-    `📎 Attached: ${file.name} (${formatBytes(file.size)}) — click Encrypt to send it, or type here to replace it with text.`;
+  document.getElementById('msg').value = MSG_FILE_ATTACHED(file.name, formatBytes(file.size));
 }
 
 async function importMsgBox(){
@@ -725,7 +740,7 @@ function exportMsgBox(){
     return;
   }
   const text = document.getElementById("msg").value;
-  if(!text){ document.getElementById("msg").value = "⚠️ Nothing here to export yet"; return; }
+  if(!text){ document.getElementById("msg").value = MSG_NOTHING_TO_EXPORT; return; }
   downloadBlob(new Blob([text], { type: 'text/plain' }), 'message.txt');
 }
 
@@ -733,7 +748,7 @@ function exportMsgBox(){
 
 function exportPlainOut(){
   if(!lastDecrypted){
-    showInlineMessage(document.getElementById("plainOut"), "⚠️ Nothing decrypted yet");
+    showInlineMessage(document.getElementById("plainOut"), MSG_NOTHING_DECRYPTED);
     return;
   }
   if(lastDecrypted.fileMeta){

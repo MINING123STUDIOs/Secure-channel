@@ -61,9 +61,11 @@ async function deriveMessageAesKey(mkSeedBytes){
   );
 }
 async function fingerprintOf(rawBytes){
-  const hash = new Uint8Array(await crypto.subtle.digest("SHA-256", rawBytes));
+  const hash = new Uint8Array(await crypto.subtle.digest("SHA-512", rawBytes));
   const hex = Array.from(hash).map(b => b.toString(16).padStart(2, '0')).join('');
-  return hex.match(/.{1,4}/g).join(' ').toUpperCase();
+  const first = hex.slice(0, 64).match(/.{1,4}/g).join(' ').toUpperCase();
+  const second = hex.slice(64).match(/.{1,4}/g).join(' ').toUpperCase();
+  return ' ' + first + '\n[' + second + ']';
 }
 async function computeInitialSharedSecret(myPriv, peerPub){
   const raw = await dh(myPriv, peerPub);
