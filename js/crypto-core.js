@@ -51,7 +51,10 @@ async function kdfRK(rkBytes, dhOutBytes){
     { name: "HKDF", hash: "SHA-256", salt: rkBytes, info: new TextEncoder().encode("dr-root") },
     ikm, 512
   ));
-  return { newRK: out.slice(0, 32), newCKseed: out.slice(32, 64) };
+  const newRK = out.slice(0, 32);
+  const newCKseed = out.slice(32, 64);
+  secureClear(out);
+  return { newRK, newCKseed };
 }
 async function deriveMessageAesKey(mkSeedBytes){
   const ikm = await crypto.subtle.importKey("raw", mkSeedBytes, "HKDF", false, ["deriveKey"]);
@@ -74,6 +77,7 @@ async function computeInitialSharedSecret(myPriv, peerPub){
     { name: "HKDF", hash: "SHA-256", salt: new TextEncoder().encode("dr-init-salt"), info: new TextEncoder().encode("dr-init-root") },
     ikm, 256
   ));
+  secureClear(raw);
   return out;
 }
 
@@ -118,6 +122,7 @@ class RatchetSession {
     s.DHrRaw = peerStaticPubRaw;
     const dhOut = await dh(s.DHs.privateKey, s.DHr);
     const { newRK, newCKseed } = await kdfRK(sharedSecretBytes, dhOut);
+    secureClear(dhOut);
     s.RK = newRK;
     s.CKs = newCKseed;
     s.CKr = null;
@@ -143,6 +148,7 @@ class RatchetSession {
     const { mkSeed, nextCK } = await kdfCK(this.CKs);
     this.CKs = nextCK;
     const aesKey = await deriveMessageAesKey(mkSeed);
+    secureClear(mkSeed);
 
     const myPubRawLocal = await exportPub(this.DHs.publicKey);
     const header = Object.assign({ dh: b64(myPubRawLocal), pn: this.PN, n: this.Ns }, extraHeaderFields || {});
@@ -164,6 +170,7 @@ class RatchetSession {
     while(nr < until){
       const { mkSeed, nextCK } = await kdfCK(ckr);
       const aesKey = await deriveMessageAesKey(mkSeed);
+      secureClear(mkSeed);
       while(this.skipped.size + staged.length >= MAX_SKIPPED_KEYS){
         const oldest = this.skipped.keys().next().value;
         const oldKey = this.skipped.get(oldest);
@@ -203,7 +210,7 @@ class RatchetSession {
       throw new Error("invalid iv");
     }
     const dhRawIncoming = unb64(header.dh);
-    if(dhRawIncoming.length !== 65){
+    if(dhRawIncoming.length < 80 || dhRawIncoming.length > 120){
       throw new Error("invalid public key length");
     }
     const skipKey = header.dh + ":" + header.n;
@@ -250,12 +257,15 @@ class RatchetSession {
 
       const dhOut1 = await dh(tDHs.privateKey, tDHr);
       const step1 = await kdfRK(tRK, dhOut1);
+      secureClear(dhOut1);
       tRK = step1.newRK;
       tCKr = step1.newCKseed;
 
+      const oldDHs = tDHs;
       tDHs = await generateDHKeyPair();
       const dhOut2 = await dh(tDHs.privateKey, tDHr);
       const step2 = await kdfRK(tRK, dhOut2);
+      secureClear(dhOut2);
       tRK = step2.newRK;
       const tCKs = step2.newCKseed;
 
@@ -265,6 +275,7 @@ class RatchetSession {
 
       const { mkSeed, nextCK } = await kdfCK(tCKr);
       const aesKey = await deriveMessageAesKey(mkSeed);
+      secureClear(mkSeed);
 
       const plainBuf = await crypto.subtle.decrypt({ name: "AES-GCM", iv, additionalData: aad }, aesKey, data);
 
@@ -281,6 +292,7 @@ class RatchetSession {
 
       const { mkSeed, nextCK } = await kdfCK(tCKr);
       const aesKey = await deriveMessageAesKey(mkSeed);
+      secureClear(mkSeed);
 
       const plainBuf = await crypto.subtle.decrypt({ name: "AES-GCM", iv, additionalData: aad }, aesKey, data);
 

@@ -537,6 +537,52 @@ document.addEventListener('DOMContentLoaded', () => {
     if(this.value === MSG_NOTHING_TO_EXPORT) this.value = '';
   });
   document.getElementById('cipherIn').addEventListener('input', () => { pendingDecryptPacket = null; });
+
+  /* ---------- button bindings ---------- */
+
+  document.getElementById('themeToggleBtn').addEventListener('click', toggleTheme);
+
+  document.getElementById('generateKeysBtn').addEventListener('click', generateKeys);
+  document.getElementById('exportIdentityBtn').addEventListener('click', exportIdentity);
+  document.getElementById('importIdentityBtn').addEventListener('click', importIdentity);
+
+  document.getElementById('copyPubKeyBtn').addEventListener('click', () => copyBox('pubKey'));
+  document.getElementById('exportPubKeyBtn').addEventListener('click', () => exportTextBox('pubKey', 'my-public-key.txt'));
+
+  document.getElementById('togglePrivBtn').addEventListener('click', togglePriv);
+  document.getElementById('copyPrivKeyBtn').addEventListener('click', () => copyBox('privKey'));
+  document.getElementById('exportPrivKeyBtn').addEventListener('click', () => exportTextBox('privKey', 'my-private-key.txt', true));
+
+  document.getElementById('copyPeerKeyBtn').addEventListener('click', () => copyBox('peerKey'));
+  document.getElementById('pastePeerKeyBtn').addEventListener('click', () => pasteInputField('peerKey'));
+  document.getElementById('exportPeerKeyBtn').addEventListener('click', () => exportTextBox('peerKey', 'peer-public-key.txt'));
+  document.getElementById('importPeerKeyBtn').addEventListener('click', () => importIntoTextarea('peerKey'));
+  document.getElementById('clearPeerKeyBtn').addEventListener('click', () => clearInputField('peerKey'));
+
+  document.getElementById('deriveBtn').addEventListener('click', derive);
+  document.getElementById('resetSessionBtn').addEventListener('click', resetSessionUI);
+
+  document.getElementById('copyMsgBtn').addEventListener('click', () => copyBox('msg'));
+  document.getElementById('pasteMsgBtn').addEventListener('click', () => pasteInputField('msg'));
+  document.getElementById('exportMsgBtn').addEventListener('click', exportMsgBox);
+  document.getElementById('importMsgBtn').addEventListener('click', importMsgBox);
+  document.getElementById('clearMsgBtn').addEventListener('click', () => clearInputField('msg'));
+
+  document.getElementById('encryptBtn').addEventListener('click', doEncrypt);
+
+  document.getElementById('copyCipherOutBtn').addEventListener('click', () => copyBox('cipherOut'));
+  document.getElementById('exportCipherOutBtn').addEventListener('click', () => exportTextBox('cipherOut', 'encrypted-message.bin'));
+
+  document.getElementById('copyCipherInBtn').addEventListener('click', () => copyBox('cipherIn'));
+  document.getElementById('pasteCipherInBtn').addEventListener('click', () => pasteInputField('cipherIn'));
+  document.getElementById('exportCipherInBtn').addEventListener('click', () => exportTextBox('cipherIn', 'encrypted-message.bin'));
+  document.getElementById('importCipherInBtn').addEventListener('click', () => importIntoTextarea('cipherIn'));
+  document.getElementById('clearCipherInBtn').addEventListener('click', () => clearInputField('cipherIn'));
+
+  document.getElementById('decryptBtn').addEventListener('click', doDecrypt);
+
+  document.getElementById('copyPlainOutBtn').addEventListener('click', () => copyBox('plainOut'));
+  document.getElementById('exportPlainOutBtn').addEventListener('click', exportPlainOut);
 });
 
 async function derive(){
