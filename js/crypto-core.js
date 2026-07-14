@@ -91,6 +91,24 @@ class RatchetSession {
     this.Nr = 0;
     this.PN = 0;
     this.skipped = new Map();
+    this._decryptTimestamps = [];
+  }
+
+  clear(){
+    this.DHs = null;
+    this.DHr = null;
+    this.DHrRaw = null;
+    if(this.RK) secureClear(this.RK);
+    if(this.CKs) secureClear(this.CKs);
+    if(this.CKr) secureClear(this.CKr);
+    this.RK = null;
+    this.CKs = null;
+    this.CKr = null;
+    for(const [, key] of this.skipped) secureClear(key);
+    this.skipped.clear();
+    this.Ns = 0;
+    this.Nr = 0;
+    this.PN = 0;
   }
 
   static async initAsInitiator(sharedSecretBytes, peerStaticPubKey, peerStaticPubRaw){
@@ -146,8 +164,11 @@ class RatchetSession {
     while(nr < until){
       const { mkSeed, nextCK } = await kdfCK(ckr);
       const aesKey = await deriveMessageAesKey(mkSeed);
-      if(this.skipped.size + staged.length >= MAX_SKIPPED_KEYS){
-        throw new Error("too many unread out-of-order messages pending");
+      while(this.skipped.size + staged.length >= MAX_SKIPPED_KEYS){
+        const oldest = this.skipped.keys().next().value;
+        const oldKey = this.skipped.get(oldest);
+        secureClear(oldKey);
+        this.skipped.delete(oldest);
       }
       staged.push({ key: dhKeyB64 + ":" + nr, aesKey });
       ckr = nextCK;
@@ -161,14 +182,35 @@ class RatchetSession {
   // streaming importer for a very large file) so both paths converge
   // on the same decryption logic below.
   async decrypt(packet, onProgress){
+    const now = Date.now();
+    this._decryptTimestamps = this._decryptTimestamps.filter(t => now - t < 1000);
+    if(this._decryptTimestamps.length >= DECRYPT_RATE_LIMIT){
+      throw new Error("decryption rate limit exceeded");
+    }
+    this._decryptTimestamps.push(now);
     if(!packet || packet.v !== 3 || !packet.header) throw new Error("unrecognized packet format");
     const header = packet.header;
     if(typeof header.dh !== "string" || typeof header.n !== "number" || typeof header.pn !== "number"){
       throw new Error("malformed header");
     }
+    if(header.n < 0 || header.pn < 0 || !Number.isInteger(header.n) || !Number.isInteger(header.pn)){
+      throw new Error("invalid header numbers");
+    }
+    if(header.dh.length > 200 || !/^[A-Za-z0-9+/=]+$/.test(header.dh)){
+      throw new Error("invalid dh field");
+    }
+    if(!packet.iv || typeof packet.iv !== "string" || packet.iv.length > 50){
+      throw new Error("invalid iv");
+    }
     const dhRawIncoming = unb64(header.dh);
+    if(dhRawIncoming.length !== 65){
+      throw new Error("invalid public key length");
+    }
     const skipKey = header.dh + ":" + header.n;
     const iv = unb64(packet.iv);
+    if(iv.length !== 12){
+      throw new Error("invalid iv length");
+    }
     const data = packet.cipherBytes ? packet.cipherBytes : await base64ChunksToBytes(packet.dataChunks, onProgress);
     const aad = new TextEncoder().encode(JSON.stringify(header));
 

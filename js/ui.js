@@ -21,12 +21,14 @@
 
 let kp = null;           // my long-term identity key pair
 let myPubRaw = null;     // raw bytes of my identity public key
+let myPrivKeyB64 = null; // private key base64, kept out of DOM
 let session = null;      // RatchetSession once established
 let peerPubRawCached = null;
 
 // --- state for large-payload / attachment handling ---
 let pendingAttachment = null;   // { file, name, type, size } set by importMsgBox()
 let lastEncryptedPacket = null; // the actual packet object behind cipherOut's display
+let lastEncryptedPacketB64 = null; // cached base64 for clipboard
 let pendingDecryptPacket = null;// a packet reconstructed from a large imported file
 let lastDecrypted = null;       // { bytes: Uint8Array, fileMeta: {name,type}|null } behind plainOut's display
 
@@ -191,7 +193,7 @@ async function pasteInputField(id) {
       updatePeerFingerprint();
     }
   } catch(e) {
-    console.error('Paste failed:', e);
+    console.error('Paste failed:', e.message);
     showInlineMessage(document.getElementById("cipherOut"), MSG_CLIPBOARD_FAILED);
   }
 }
@@ -278,7 +280,7 @@ async function copyBox(id){
       showInlineMessage(document.getElementById("cipherOut"), MSG_TOO_LARGE_TO_COPY);
       return;
     }
-    navigator.clipboard.writeText(await encodeOpaquePacket(lastEncryptedPacket));
+    navigator.clipboard.writeText(lastEncryptedPacketB64);
     return;
   }
   if(id === 'plainOut'){
@@ -294,11 +296,13 @@ async function copyBox(id){
     navigator.clipboard.writeText(new TextDecoder().decode(lastDecrypted.bytes));
     return;
   }
-  const el = document.getElementById(id);
-  const text = el.value !== undefined ? el.value : el.textContent;
   if(id === 'privKey'){
     if(!await confirmPrivateKeyExposure("copy", document.getElementById("privKeyOut"))) return;
+    navigator.clipboard.writeText(myPrivKeyB64);
+    return;
   }
+  const el = document.getElementById(id);
+  const text = el.value !== undefined ? el.value : el.textContent;
   navigator.clipboard.writeText(text);
 }
 
@@ -313,12 +317,15 @@ async function exportTextBox(id, filename, isSensitive){
     }
     return;
   }
+  if(id === 'privKey'){
+    if(!myPrivKeyB64){ showInlineMessage(document.getElementById("privKeyOut"), MSG_NOTHING_TO_EXPORT); return; }
+    if(!await confirmPrivateKeyExposure("export", document.getElementById("privKeyOut"))) return;
+    downloadBlob(new Blob([myPrivKeyB64], { type: 'text/plain' }), filename);
+    return;
+  }
   const el = document.getElementById(id);
   const text = el.value !== undefined ? el.value : el.textContent;
-  if(!text){ showInlineMessage(document.getElementById(id === 'privKey' ? 'privKeyOut' : id), MSG_NOTHING_TO_EXPORT); return; }
-  if(isSensitive){
-    if(!await confirmPrivateKeyExposure("export", document.getElementById("privKeyOut"))) return;
-  }
+  if(!text){ showInlineMessage(document.getElementById(id), MSG_NOTHING_TO_EXPORT); return; }
   downloadBlob(new Blob([text], { type: 'text/plain' }), filename);
 }
 
@@ -360,7 +367,7 @@ async function importIntoTextareaProcess(id, file){
           }
         }
       } catch(e){
-        console.error(e);
+        console.error('File import failed:', e.message);
         document.getElementById('cipherIn').value = MSG_CANT_READ_CIPHER_FILE(file.name);
         return;
       } finally {
@@ -394,11 +401,14 @@ async function updateMyFingerprint(){
 }
 
 function resetTransientState(){
+  if(session) session.clear();
   session = null;
   peerPubRawCached = null;
   pendingAttachment = null;
   lastEncryptedPacket = null;
+  lastEncryptedPacketB64 = null;
   pendingDecryptPacket = null;
+  if(lastDecrypted && lastDecrypted.bytes) secureClear(lastDecrypted.bytes);
   lastDecrypted = null;
   document.getElementById("cipherOut").textContent = "";
   document.getElementById("plainOut").textContent = "";
@@ -413,7 +423,9 @@ async function generateKeys(){
   resetTransientState();
 
   document.getElementById("pubKey").value = b64(myPubRaw);
-  document.getElementById("privKey").value = b64(privRaw);
+  myPrivKeyB64 = b64(privRaw);
+  document.getElementById("privKey").value = '•'.repeat(myPrivKeyB64.length);
+  secureClear(privRaw);
   await updateMyFingerprint();
 
   setStatus(STATUS_KEYS_GENERATED);
@@ -429,6 +441,7 @@ async function exportIdentity(){
     publicKey: b64(myPubRaw),
     privateKey: b64(privRaw)
   };
+  secureClear(privRaw);
   const bytes = await encodeIdentityBytes(payload);
   downloadBlob(new Blob([bytes], { type: 'application/octet-stream' }), 'secure-channel-identity.scid');
 }
@@ -444,6 +457,7 @@ async function importIdentity(){
     if(bytesEqual(magicBytes, ID_MAGIC)){
       const fullBytes = new Uint8Array(await file.arrayBuffer());
       obj = await decodeIdentityBytes(fullBytes);
+      secureClear(fullBytes);
     } else {
       obj = JSON.parse(await file.text());
     }
@@ -454,18 +468,20 @@ async function importIdentity(){
     const pubBytes = unb64(obj.publicKey);
     const privateKey = await crypto.subtle.importKey("pkcs8", privBytes, { name: "ECDH", namedCurve: "P-256" }, true, ["deriveBits"]);
     const publicKey = await crypto.subtle.importKey("spki", pubBytes, { name: "ECDH", namedCurve: "P-256" }, true, []);
+    secureClear(privBytes);
 
     kp = { privateKey, publicKey };
     myPubRaw = pubBytes;
     resetTransientState();
 
     document.getElementById("pubKey").value = obj.publicKey;
-    document.getElementById("privKey").value = obj.privateKey;
+    myPrivKeyB64 = obj.privateKey;
+    document.getElementById("privKey").value = '•'.repeat(myPrivKeyB64.length);
     await updateMyFingerprint();
 
     setStatus(STATUS_IDENTITY_RESTORED);
   } catch(e){
-    console.error(e);
+    console.error('Identity import failed:', e.message);
     showInlineMessage(document.getElementById("cipherOut"), MSG_INVALID_IDENTITY_FILE);
   }
 }
@@ -480,18 +496,21 @@ async function togglePriv(){
   const label = document.getElementById("toggleLabel");
   if(el.type === "password"){
     if(!await confirmPrivateKeyExposure("reveal", document.getElementById("privKeyOut"))) return;
+    el.value = myPrivKeyB64;
     el.type = "text";
     icon.classList.add("crossed");
     label.textContent = LABEL_HIDE;
     if(_privKeyAutohideTimer) clearTimeout(_privKeyAutohideTimer);
     _privKeyAutohideTimer = setTimeout(() => {
       el.type = "password";
+      el.value = '•'.repeat(myPrivKeyB64.length);
       icon.classList.remove("crossed");
       label.textContent = LABEL_SHOW;
       _privKeyAutohideTimer = null;
     }, PRIVKEY_AUTOHIDE_TIMEOUT);
   } else {
     el.type = "password";
+    el.value = '•'.repeat(myPrivKeyB64.length);
     icon.classList.remove("crossed");
     label.textContent = LABEL_SHOW;
     if(_privKeyAutohideTimer){ clearTimeout(_privKeyAutohideTimer); _privKeyAutohideTimer = null; }
@@ -558,7 +577,7 @@ async function derive(){
 
     setStatus(STATUS_SESSION_ESTABLISHED(!!session.CKs));
   } catch(e){
-    console.error("DERIVE ERROR:", e);
+    console.error("DERIVE ERROR:", e.message);
     setStatus(STATUS_SESSION_FAILED);
   }
 }
@@ -604,7 +623,7 @@ async function doEncrypt(){
     try {
       plaintextBytes = new Uint8Array(await pendingAttachment.file.arrayBuffer());
     } catch(e){
-      console.error(e);
+      console.error('File read failed:', e.message);
       outEl.textContent = MSG_CANT_READ_FILE;
       if(willBeLarge) Progress.hide();
       return;
@@ -627,15 +646,16 @@ async function doEncrypt(){
       willBeLarge ? (f) => Progress.update(f, PROGRESS_ENCRYPTING) : null
     );
     lastEncryptedPacket = packet;
+    lastEncryptedPacketB64 = await encodeOpaquePacket(packet);
 
     if(plaintextBytes.length > DISPLAY_THRESHOLD){
       const approxCipherSize = estimateChunksByteLength(packet.dataChunks);
       outEl.textContent = MSG_ENCRYPTED_LARGE(formatBytes(approxCipherSize));
     } else {
-      outEl.textContent = await encodeOpaquePacket(packet);
+      outEl.textContent = lastEncryptedPacketB64;
     }
   } catch(e){
-    console.error(e);
+    console.error('Encryption failed:', e.message);
     if(e.message && e.message.includes("no sending chain")){
       outEl.textContent = MSG_CANT_SEND_YET;
     } else {
@@ -670,7 +690,7 @@ async function doDecryptProcess(packet){
       outEl.textContent = "🔓 " + new TextDecoder().decode(plainBytes);
     }
   } catch(e){
-    console.error("DECRYPT ERROR:", e);
+    console.error("DECRYPT ERROR:", e.message);
     lastDecrypted = null;
     let msg = MSG_DECRYPT_FAILED;
     if(e.message && e.message.includes("unrecognized packet")){

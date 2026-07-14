@@ -81,6 +81,7 @@
 
 const MAX_SKIP = 1000;
 const MAX_SKIPPED_KEYS = 2000;
+const DECRYPT_RATE_LIMIT = 2; // max decryptions per second
 
 const CHUNK_BYTES = 64 * 1024 * 1024;              // 64MB raw per base64 chunk (~85MB base64, far under the ~512M char engine limit)
 const DISPLAY_THRESHOLD = 1 * 1024 * 1024;         // above this, show a summary in the UI instead of the full content
@@ -444,6 +445,13 @@ async function decodeIdentityBytes(bytes){
   return JSON.parse(json);
 }
 
+/* ---------- secure memory clearing ---------- */
+
+function secureClear(buf){
+  if(buf instanceof Uint8Array) buf.fill(0);
+  else if(buf instanceof ArrayBuffer) new Uint8Array(buf).fill(0);
+}
+
 /* ---------- byte helpers ---------- */
 
 function b64(bufOrArr){
@@ -469,8 +477,14 @@ function bytesEqual(a, b){
 }
 function compareBytes(a, b){
   const len = Math.min(a.length, b.length);
-  for(let i = 0; i < len; i++){ if(a[i] !== b[i]) return a[i] - b[i]; }
-  return a.length - b.length;
+  let diff = 0;
+  let firstDiffPos = 0;
+  for(let i = 0; i < len; i++){
+    diff |= a[i] ^ b[i];
+    if(diff && !firstDiffPos) firstDiffPos = i + 1;
+  }
+  if(diff === 0) return a.length - b.length;
+  return (a[firstDiffPos - 1] < b[firstDiffPos - 1]) ? -1 : 1;
 }
 function concatBytes(...arrs){
   const total = arrs.reduce((s, a) => s + a.length, 0);
