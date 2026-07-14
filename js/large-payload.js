@@ -135,3 +135,115 @@ async function streamingParseLargeFile(blob, windowSize, onProgress){
 
   return { v: 3, header: headerObj, iv: ivStr, cipherBytes };
 }
+
+/* ---------- binary large-payload export ---------- */
+
+async function buildLargeExportPartsBinary(packet){
+  const headerBytes = await maskBytes(new TextEncoder().encode(JSON.stringify(packet.header)));
+  const ivBytes = unb64(packet.iv);
+  const chunkCount = packet.dataChunks.length;
+
+  // Pre-compute raw cipher bytes for each chunk (avoid holding all in memory at once)
+  const parts = [];
+  parts.push(new Uint8Array(BIN_MAGIC_LARGE));
+
+  // header length (4 bytes big-endian) + masked header
+  const headerLenBuf = new Uint8Array(4);
+  new DataView(headerLenBuf.buffer).setUint32(0, headerBytes.length, false);
+  parts.push(headerLenBuf);
+  parts.push(headerBytes);
+
+  // IV (12 bytes raw)
+  parts.push(ivBytes);
+
+  // chunk count (4 bytes big-endian)
+  const countBuf = new Uint8Array(4);
+  new DataView(countBuf.buffer).setUint32(0, chunkCount, false);
+  parts.push(countBuf);
+
+  // each chunk: length (4 bytes) + raw bytes
+  for(const c of packet.dataChunks){
+    const raw = unb64(c);
+    const lenBuf = new Uint8Array(4);
+    new DataView(lenBuf.buffer).setUint32(0, raw.length, false);
+    parts.push(lenBuf);
+    parts.push(raw);
+  }
+
+  return parts;
+}
+
+/* ---------- binary large-payload import ---------- */
+
+async function streamingParseLargeBinaryFile(blob, windowSize, onProgress){
+  windowSize = windowSize || IMPORT_WINDOW;
+  let offset = 0;
+  let buf = new Uint8Array(0);
+
+  function ensure(n){
+    // Ensure buf has at least n bytes, reading more from the file if needed
+    return (async () => {
+      while(buf.length < n){
+        if(offset >= blob.size) throw new Error("binary file ended unexpectedly");
+        const slice = await blob.slice(offset, Math.min(offset + windowSize, blob.size)).arrayBuffer();
+        offset += slice.byteLength;
+        const newBuf = new Uint8Array(buf.length + slice.byteLength);
+        newBuf.set(buf);
+        newBuf.set(new Uint8Array(slice), buf.length);
+        buf = newBuf;
+        if(onProgress) onProgress(Math.min(offset, blob.size) / (blob.size || 1));
+        await yieldToUI();
+      }
+    })();
+  }
+
+  function readU32(){
+    const v = new DataView(buf.buffer, buf.byteOffset, 4).getUint32(0, false);
+    buf = buf.slice(4);
+    return v;
+  }
+
+  function readBytes(n){
+    const out = buf.slice(0, n);
+    buf = buf.slice(n);
+    return out;
+  }
+
+  // magic (already verified by caller, skip 4 bytes)
+  await ensure(4);
+  buf = buf.slice(4);
+
+  // header
+  await ensure(4);
+  const headerLen = readU32();
+  await ensure(headerLen);
+  const maskedHeader = readBytes(headerLen);
+  const headerObj = JSON.parse(new TextDecoder().decode(await unmaskBytes(maskedHeader)));
+
+  // IV (12 bytes raw, encode to base64 for the packet)
+  await ensure(12);
+  const ivBytes = readBytes(12);
+  const ivStr = b64(ivBytes);
+
+  // chunk count
+  await ensure(4);
+  const chunkCount = readU32();
+
+  // chunks
+  const chunkBytesList = [];
+  for(let i = 0; i < chunkCount; i++){
+    await ensure(4);
+    const chunkLen = readU32();
+    await ensure(chunkLen);
+    chunkBytesList.push(readBytes(chunkLen));
+    if(onProgress) onProgress((i + 1) / chunkCount);
+    await yieldToUI();
+  }
+
+  const total = chunkBytesList.reduce((s, c) => s + c.length, 0);
+  const cipherBytes = new Uint8Array(total);
+  let off = 0;
+  for(const c of chunkBytesList){ cipherBytes.set(c, off); off += c.length; }
+
+  return { v: 3, header: headerObj, iv: ivStr, cipherBytes };
+}

@@ -155,6 +155,65 @@ function formatBytes(n){
   return (n / (1024 * 1024)).toFixed(2) + " MB";
 }
 
+/* ---------- Clear button functionality ---------- */
+
+function clearInputField(id) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  
+  // Clear the field
+  el.value = '';
+  
+  // Handle specific field logic
+  if (id === 'msg') {
+    pendingAttachment = null;
+  } else if (id === 'cipherIn') {
+    pendingDecryptPacket = null;
+  } else if (id === 'peerKey') {
+    updatePeerFingerprint();
+  }
+}
+
+/* ---------- Paste button functionality ---------- */
+
+async function pasteInputField(id) {
+  try {
+    const text = await navigator.clipboard.readText();
+    const el = document.getElementById(id);
+    if (!el) return;
+    
+    el.value = text;
+    
+    // Handle specific field logic
+    if (id === 'peerKey') {
+      updatePeerFingerprint();
+    }
+  } catch(e) {
+    console.error('Paste failed:', e);
+    alert('⚠️ Could not read from clipboard. Please paste manually.');
+  }
+}
+
+/* ---------- Large file import confirmation ---------- */
+
+function showLargeImportWarning(outEl, file, onConfirm){
+  outEl.textContent = `⚠️ File is ${formatBytes(file.size)} — too large to import safely. The browser may crash or become unresponsive.`;
+  const row = document.createElement('div');
+  row.className = 'confirm-row';
+  const yes = document.createElement('button');
+  yes.className = 'confirm-yes';
+  yes.textContent = '✅ Import anyway';
+  const no = document.createElement('button');
+  no.className = 'confirm-no';
+  no.textContent = '❌ Cancel';
+  function cleanup(){ row.remove(); outEl.textContent = ''; }
+  yes.onclick = () => { cleanup(); onConfirm(file); };
+  no.onclick = cleanup;
+  row.appendChild(yes);
+  row.appendChild(no);
+  outEl.parentElement.insertBefore(row, outEl.nextSibling);
+}
+
 function estimateChunksByteLength(chunks){
   // rough (slightly over-) estimate of decoded byte size from base64 chunk lengths, for display purposes only
   return chunks.reduce((s, c) => s + Math.floor(c.length * 0.75), 0);
@@ -200,10 +259,10 @@ async function exportTextBox(id, filename, isSensitive){
   if(id === 'cipherOut'){
     if(!lastEncryptedPacket){ alert("⚠️ Nothing here to export yet"); return; }
     if(estimateChunksByteLength(lastEncryptedPacket.dataChunks) > STREAMING_EXPORT_THRESHOLD){
-      const parts = await buildLargeExportParts(lastEncryptedPacket);
-      downloadBlob(new Blob(parts, { type: 'application/octet-stream' }), filename.replace(/\.[^.]+$/, '.scl'));
+      const parts = await buildLargeExportPartsBinary(lastEncryptedPacket);
+      downloadBlob(new Blob(parts, { type: 'application/octet-stream' }), filename.replace(/\.[^.]+$/, '.scb'));
     } else {
-      downloadBlob(new Blob([await encodeOpaquePacket(lastEncryptedPacket)], { type: 'application/octet-stream' }), filename);
+      downloadBlob(new Blob([await encodeOpaquePacketBinary(lastEncryptedPacket)], { type: 'application/octet-stream' }), filename);
     }
     return;
   }
@@ -214,29 +273,44 @@ async function exportTextBox(id, filename, isSensitive){
   downloadBlob(new Blob([text], { type: 'text/plain' }), filename);
 }
 
-async function importIntoTextarea(id){
-  const file = await pickFile();
-  if(!file) return;
-
+async function importIntoTextareaProcess(id, file){
   if(id === 'cipherIn'){
     pendingDecryptPacket = null;
     if(file.size > DISPLAY_THRESHOLD){
       const showSpinner = file.size > SPINNER_THRESHOLD;
       try {
         if(showSpinner) Progress.show('Reading file…');
-        const magicPeek = await file.slice(0, LARGE_FORMAT_MAGIC.length + 1).text();
-        if(magicPeek.startsWith(LARGE_FORMAT_MAGIC)){
-          pendingDecryptPacket = await streamingParseLargeFile(
+
+        // Peek at the first bytes to detect format
+        const magicSlice = await file.slice(0, 4).arrayBuffer();
+        const magicBytes = new Uint8Array(magicSlice);
+        const isBinSmall = bytesEqual(magicBytes, BIN_MAGIC_SMALL);
+        const isBinLarge = bytesEqual(magicBytes, BIN_MAGIC_LARGE);
+
+        if(isBinSmall){
+          const fullBytes = new Uint8Array(await file.arrayBuffer());
+          pendingDecryptPacket = await decodeOpaquePacketBinary(fullBytes);
+        } else if(isBinLarge){
+          pendingDecryptPacket = await streamingParseLargeBinaryFile(
             file, undefined,
             showSpinner ? (f) => Progress.update(f, 'Reading file…') : null
           );
-        } else if(file.size > STREAMING_EXPORT_THRESHOLD){
-          document.getElementById('cipherIn').value =
-            `⚠️ This file is ${formatBytes(file.size)} and isn't in this tool's streaming format — ` +
-            `it may fail to load. If it came from this tool's Export, that's unexpected; otherwise it wasn't meant for direct import this large.`;
-          return;
         } else {
-          pendingDecryptPacket = await decodeOpaquePacket(await file.text());
+          // Not binary — try text formats (old .scl or base64)
+          const magicPeek = new TextDecoder().decode(magicBytes);
+          if(magicPeek.startsWith(LARGE_FORMAT_MAGIC)){
+            pendingDecryptPacket = await streamingParseLargeFile(
+              file, undefined,
+              showSpinner ? (f) => Progress.update(f, 'Reading file…') : null
+            );
+          } else if(file.size > STREAMING_EXPORT_THRESHOLD){
+            document.getElementById('cipherIn').value =
+              `⚠️ This file is ${formatBytes(file.size)} and isn't in this tool's format — ` +
+              `it may fail to load. If it came from this tool's Export, that's unexpected; otherwise it wasn't meant for direct import this large.`;
+            return;
+          } else {
+            pendingDecryptPacket = await decodeOpaquePacket(await file.text());
+          }
         }
       } catch(e){
         console.error(e);
@@ -253,6 +327,17 @@ async function importIntoTextarea(id){
 
   document.getElementById(id).value = (await file.text()).trim();
   if(id === 'peerKey') await updatePeerFingerprint();
+}
+
+async function importIntoTextarea(id){
+  const file = await pickFile();
+  if(!file) return;
+  if(file.size > LARGE_IMPORT_CONFIRM_THRESHOLD){
+    const outEl = id === 'cipherIn' ? document.getElementById('plainOut') : document.getElementById('cipherOut');
+    showLargeImportWarning(outEl, file, (f) => importIntoTextareaProcess(id, f));
+    return;
+  }
+  await importIntoTextareaProcess(id, file);
 }
 
 /* ---------- Key generation & identity import/export ---------- */
@@ -486,23 +571,8 @@ async function doEncrypt(){
   }
 }
 
-async function doDecrypt(){
+async function doDecryptProcess(packet){
   const outEl = document.getElementById("plainOut");
-  if(!session){
-    outEl.textContent = "⚠️ No shared secret — set up a session first";
-    return;
-  }
-
-  let packet = pendingDecryptPacket;
-  if(!packet){
-    try {
-      packet = await decodeOpaquePacket(document.getElementById("cipherIn").value);
-    } catch(e){
-      outEl.textContent = "❌ That doesn't look like a valid encrypted message — check you copied the whole thing.";
-      return;
-    }
-  }
-
   const approxSize = packet.cipherBytes
     ? packet.cipherBytes.length
     : estimateChunksByteLength(packet.dataChunks || []);
@@ -543,14 +613,51 @@ async function doDecrypt(){
   }
 }
 
+async function doDecrypt(){
+  const outEl = document.getElementById("plainOut");
+  if(!session){
+    outEl.textContent = "⚠️ No shared secret — set up a session first";
+    return;
+  }
+
+  let packet = pendingDecryptPacket;
+  if(!packet){
+    try {
+      packet = await decodeOpaquePacket(document.getElementById("cipherIn").value);
+    } catch(e){
+      outEl.textContent = "❌ That doesn't look like a valid encrypted message — check you copied the whole thing.";
+      return;
+    }
+  }
+
+  const approxSize = packet.cipherBytes
+    ? packet.cipherBytes.length
+    : estimateChunksByteLength(packet.dataChunks || []);
+
+  if(approxSize > LARGE_IMPORT_CONFIRM_THRESHOLD){
+    showLargeImportWarning(outEl, { size: approxSize, name: 'encrypted message' }, () => doDecryptProcess(packet));
+    return;
+  }
+
+  await doDecryptProcess(packet);
+}
+
 /* ---------- msg box: attach any file, any size ---------- */
+
+function importMsgBoxAttach(file){
+  pendingAttachment = { file, name: file.name, type: file.type || 'application/octet-stream', size: file.size };
+  document.getElementById('msg').value =
+    `📎 Attached: ${file.name} (${formatBytes(file.size)}) — click Encrypt to send it, or type here to replace it with text.`;
+}
 
 async function importMsgBox(){
   const file = await pickFile();
   if(!file) return;
-  pendingAttachment = { file, name: file.name, type: file.type || 'application/octet-stream', size: file.size };
-  document.getElementById('msg').value =
-    `📎 Attached: ${file.name} (${formatBytes(file.size)}) — click Encrypt to send it, or type here to replace it with text.`;
+  if(file.size > LARGE_IMPORT_CONFIRM_THRESHOLD){
+    showLargeImportWarning(document.getElementById('cipherOut'), file, importMsgBoxAttach);
+    return;
+  }
+  importMsgBoxAttach(file);
 }
 
 function exportMsgBox(){

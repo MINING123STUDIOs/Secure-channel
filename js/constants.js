@@ -91,6 +91,13 @@ const STREAMING_EXPORT_THRESHOLD = 200 * 1024 * 1024; // above this, Export bypa
 const LARGE_FORMAT_MAGIC = "N2xkVA1Qy7ZpKf3H";
 const IMPORT_WINDOW = 32 * 1024 * 1024;            // read window size when streaming-importing a large file
 const SPINNER_THRESHOLD = 512 * 1024;              // above this, show the progress indicator for encrypt/decrypt/read/import
+const LARGE_IMPORT_CONFIRM_THRESHOLD = 300 * 1024 * 1024; // above this, ask for confirmation before importing (may crash browser)
+
+// Binary format magic bytes — 4-byte signatures written at the start of
+// exported files so import can distinguish binary from base64 text.
+// "SCBN" = Secure Channel Binary (small/normal), "SCBL" = Secure Channel Binary Large.
+const BIN_MAGIC_SMALL = new Uint8Array([0x53, 0x43, 0x42, 0x4E]); // "SCBN"
+const BIN_MAGIC_LARGE = new Uint8Array([0x53, 0x43, 0x42, 0x4C]); // "SCBL"
 
 // Yields to the browser between chunks of otherwise-synchronous work
 // (base64 encode/decode loops, file windows) so the tab keeps painting
@@ -404,6 +411,20 @@ async function decodeOpaquePacket(str){
   const masked = unb64(cleaned);       // throws on invalid base64 — caller already handles that
   const json = new TextDecoder().decode(await unmaskBytes(masked));
   return JSON.parse(json);             // throws on malformed JSON — caller already handles that
+}
+
+// packet -> binary blob (small, for file export — raw masked bytes, not base64)
+async function encodeOpaquePacketBinary(packet){
+  const json = JSON.stringify(packet);
+  const masked = await maskBytes(new TextEncoder().encode(json));
+  return concatBytes(BIN_MAGIC_SMALL, masked);
+}
+
+// binary blob -> packet (inverse of encodeOpaquePacketBinary)
+async function decodeOpaquePacketBinary(bytes){
+  const masked = bytes.slice(BIN_MAGIC_SMALL.length);
+  const json = new TextDecoder().decode(await unmaskBytes(masked));
+  return JSON.parse(json);
 }
 
 /* ---------- byte helpers ---------- */
