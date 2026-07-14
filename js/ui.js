@@ -119,12 +119,15 @@ function setStatus(text){
 
 // Centralized warning for anything that shows, copies, or exports the
 // private key, so the message is consistent no matter which action
-// triggered it.
-function confirmPrivateKeyExposure(action){
-  return confirm(
-    `⚠️ You're about to ${action} your PRIVATE key.\n\n` +
+// triggered it. Returns a Promise<boolean> — true if the user confirmed.
+async function confirmPrivateKeyExposure(action, outEl){
+  return showConfirmWarning(
+    outEl,
+    `⚠️ You're about to ${action} your PRIVATE key. ` +
     `Anyone who obtains it can read your messages and impersonate you. ` +
-    `Only continue if you're sure of where it's going (or who's looking at your screen).`
+    `Only continue if you're sure of where it's going (or who's looking at your screen).`,
+    '✅ Continue',
+    '❌ Cancel'
   );
 }
 
@@ -190,7 +193,7 @@ async function pasteInputField(id) {
     }
   } catch(e) {
     console.error('Paste failed:', e);
-    alert('⚠️ Could not read from clipboard. Please paste manually.');
+    showInlineMessage(document.getElementById("cipherOut"), "⚠️ Could not read from clipboard. Please paste manually.");
   }
 }
 
@@ -214,36 +217,80 @@ function showLargeImportWarning(outEl, file, onConfirm){
   outEl.parentElement.insertBefore(row, outEl.nextSibling);
 }
 
+/* ---------- Generic inline confirmation warning ---------- */
+/* Active confirmations keyed by output element. Each entry stores
+   { resolve, cleanup }. Clicking a button that would trigger a new
+   confirmation in the same element cancels the previous one: resolves
+   it as false AND removes the old DOM elements synchronously. */
+const _activeConfirms = new Map();
+
+function showConfirmWarning(outEl, message, yesLabel, noLabel){
+  /* cancel any previous confirmation on this same element */
+  if(_activeConfirms.has(outEl)){
+    const prev = _activeConfirms.get(outEl);
+    prev.resolve(false);
+    prev.cleanup();
+  }
+  return new Promise(resolve => {
+    outEl.textContent = message;
+    const row = document.createElement('div');
+    row.className = 'confirm-row';
+    const yes = document.createElement('button');
+    yes.className = 'confirm-yes';
+    yes.textContent = yesLabel || '✅ Continue';
+    const no = document.createElement('button');
+    no.className = 'confirm-no';
+    no.textContent = noLabel || '❌ Cancel';
+    function cleanup(){ row.remove(); outEl.textContent = ''; _activeConfirms.delete(outEl); }
+    _activeConfirms.set(outEl, { resolve, cleanup });
+    yes.onclick = () => { cleanup(); resolve(true); };
+    no.onclick = () => { cleanup(); resolve(false); };
+    row.appendChild(yes);
+    row.appendChild(no);
+    outEl.parentElement.insertBefore(row, outEl.nextSibling);
+  });
+}
+
+/* ---------- Inline dismissible message (no user choice required) ---------- */
+const _activeWarnings = new Map();
+
+function showInlineMessage(outEl, message, ms){
+  if(_activeWarnings.has(outEl)) clearTimeout(_activeWarnings.get(outEl));
+  outEl.textContent = message;
+  const t = setTimeout(() => { outEl.textContent = ''; _activeWarnings.delete(outEl); }, ms || 3500);
+  _activeWarnings.set(outEl, t);
+}
+
 function estimateChunksByteLength(chunks){
   // rough (slightly over-) estimate of decoded byte size from base64 chunk lengths, for display purposes only
   return chunks.reduce((s, c) => s + Math.floor(c.length * 0.75), 0);
 }
 
 /* ---------- UI: generic copy / export / import for text boxes ----------
-   Note: cipherOut and plainOut are RESULT boxes (Encrypt/Decrypt output),
-   not inputs — there's deliberately no Import button wired to them in
-   index.html, since importing a file into an output space doesn't make
-   sense. Only genuine input fields (peerKey, msg, cipherIn) support
-   Import. */
+   Note: cipherOut, plainOut, and privKeyOut are RESULT boxes (Encrypt/Decrypt
+   output, or inline confirmations), not inputs — there's deliberately no
+   Import button wired to them in index.html, since importing a file into
+   an output space doesn't make sense. Only genuine input fields (peerKey,
+   msg, cipherIn) support Import. */
 
 async function copyBox(id){
   if(id === 'cipherOut'){
-    if(!lastEncryptedPacket){ alert("⚠️ Nothing here to copy yet"); return; }
+    if(!lastEncryptedPacket){ showInlineMessage(document.getElementById("cipherOut"), "⚠️ Nothing here to copy yet"); return; }
     if(estimateChunksByteLength(lastEncryptedPacket.dataChunks) > STREAMING_EXPORT_THRESHOLD){
-      alert("⚠️ This message is too large to copy to the clipboard. Use Export below to save it as a file instead.");
+      showInlineMessage(document.getElementById("cipherOut"), "⚠️ This message is too large to copy to the clipboard. Use Export below to save it as a file instead.");
       return;
     }
     navigator.clipboard.writeText(await encodeOpaquePacket(lastEncryptedPacket));
     return;
   }
   if(id === 'plainOut'){
-    if(!lastDecrypted){ alert("⚠️ Nothing decrypted yet"); return; }
+    if(!lastDecrypted){ showInlineMessage(document.getElementById("plainOut"), "⚠️ Nothing decrypted yet"); return; }
     if(lastDecrypted.fileMeta){
-      alert("This decrypted content is a file — use Export below to save it, not Copy.");
+      showInlineMessage(document.getElementById("plainOut"), "This decrypted content is a file — use Export below to save it, not Copy.");
       return;
     }
     if(lastDecrypted.bytes.length > STREAMING_EXPORT_THRESHOLD){
-      alert("⚠️ This message is too large to copy to the clipboard. Use Export below to save it as a file instead.");
+      showInlineMessage(document.getElementById("plainOut"), "⚠️ This message is too large to copy to the clipboard. Use Export below to save it as a file instead.");
       return;
     }
     navigator.clipboard.writeText(new TextDecoder().decode(lastDecrypted.bytes));
@@ -251,13 +298,15 @@ async function copyBox(id){
   }
   const el = document.getElementById(id);
   const text = el.value !== undefined ? el.value : el.textContent;
-  if(id === 'privKey' && !confirmPrivateKeyExposure("copy")) return;
+  if(id === 'privKey'){
+    if(!await confirmPrivateKeyExposure("copy", document.getElementById("privKeyOut"))) return;
+  }
   navigator.clipboard.writeText(text);
 }
 
 async function exportTextBox(id, filename, isSensitive){
   if(id === 'cipherOut'){
-    if(!lastEncryptedPacket){ alert("⚠️ Nothing here to export yet"); return; }
+    if(!lastEncryptedPacket){ showInlineMessage(document.getElementById("cipherOut"), "⚠️ Nothing here to export yet"); return; }
     if(estimateChunksByteLength(lastEncryptedPacket.dataChunks) > STREAMING_EXPORT_THRESHOLD){
       const parts = await buildLargeExportPartsBinary(lastEncryptedPacket);
       downloadBlob(new Blob(parts, { type: 'application/octet-stream' }), filename.replace(/\.[^.]+$/, '.scb'));
@@ -268,8 +317,10 @@ async function exportTextBox(id, filename, isSensitive){
   }
   const el = document.getElementById(id);
   const text = el.value !== undefined ? el.value : el.textContent;
-  if(!text){ alert("⚠️ Nothing here to export yet"); return; }
-  if(isSensitive && !confirmPrivateKeyExposure("export")) return;
+  if(!text){ showInlineMessage(document.getElementById(id === 'privKey' ? 'privKeyOut' : id), "⚠️ Nothing here to export yet"); return; }
+  if(isSensitive){
+    if(!await confirmPrivateKeyExposure("export", document.getElementById("privKeyOut"))) return;
+  }
   downloadBlob(new Blob([text], { type: 'text/plain' }), filename);
 }
 
@@ -374,8 +425,8 @@ async function generateKeys(){
 }
 
 async function exportIdentity(){
-  if(!kp){ alert("⚠️ Generate a key pair first"); return; }
-  if(!confirmPrivateKeyExposure("export (as part of your identity backup)")) return;
+  if(!kp){ showInlineMessage(document.getElementById("privKeyOut"), "⚠️ Generate a key pair first"); return; }
+  if(!await confirmPrivateKeyExposure("export (as part of your identity backup)", document.getElementById("privKeyOut"))) return;
   const privRaw = new Uint8Array(await crypto.subtle.exportKey("pkcs8", kp.privateKey));
   const payload = {
     kind: "secure-channel-identity",
@@ -409,18 +460,18 @@ async function importIdentity(){
     setStatus("✅ Identity restored. Awaiting peer...");
   } catch(e){
     console.error(e);
-    alert("⚠️ That file doesn't look like a valid identity backup.");
+    showInlineMessage(document.getElementById("cipherOut"), "⚠️ That file doesn't look like a valid identity backup.");
   }
 }
 
 // Show/Hide toggle: swaps the field type, the button label, and marks
 // the eye icon with a diagonal strike-through while the key is visible.
-function togglePriv(){
+async function togglePriv(){
   const el = document.getElementById("privKey");
   const icon = document.getElementById("eyeIcon");
   const label = document.getElementById("toggleLabel");
   if(el.type === "password"){
-    if(!confirmPrivateKeyExposure("reveal")) return;
+    if(!await confirmPrivateKeyExposure("reveal", document.getElementById("privKeyOut"))) return;
     el.type = "text";
     icon.classList.add("crossed");
     label.textContent = "Hide";
@@ -446,7 +497,10 @@ async function updatePeerFingerprint(){
 }
 document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('peerKey').addEventListener('input', updatePeerFingerprint);
-  document.getElementById('msg').addEventListener('input', () => { pendingAttachment = null; });
+  document.getElementById('msg').addEventListener('input', function(){
+    pendingAttachment = null;
+    if(this.value === '⚠️ Nothing here to export yet') this.value = '';
+  });
   document.getElementById('cipherIn').addEventListener('input', () => { pendingDecryptPacket = null; });
 });
 
@@ -493,12 +547,17 @@ async function derive(){
   }
 }
 
-function resetSessionUI(){
+async function resetSessionUI(){
   if(!session){
     setStatus("Nothing to reset — no session is active.");
     return;
   }
-  if(!confirm("This will end the current secure session. You won't be able to decrypt any messages from this conversation afterward (though your keys stay intact). Continue?")){
+  if(!await showConfirmWarning(
+    document.getElementById("cipherOut"),
+    "This will end the current secure session. You won't be able to decrypt any messages from this conversation afterward (though your keys stay intact). Continue?",
+    '✅ Reset session',
+    '❌ Cancel'
+  )){
     return;
   }
   resetTransientState();
@@ -666,7 +725,7 @@ function exportMsgBox(){
     return;
   }
   const text = document.getElementById("msg").value;
-  if(!text){ alert("⚠️ Nothing here to export yet"); return; }
+  if(!text){ document.getElementById("msg").value = "⚠️ Nothing here to export yet"; return; }
   downloadBlob(new Blob([text], { type: 'text/plain' }), 'message.txt');
 }
 
@@ -674,7 +733,7 @@ function exportMsgBox(){
 
 function exportPlainOut(){
   if(!lastDecrypted){
-    alert("⚠️ Nothing decrypted yet");
+    showInlineMessage(document.getElementById("plainOut"), "⚠️ Nothing decrypted yet");
     return;
   }
   if(lastDecrypted.fileMeta){
