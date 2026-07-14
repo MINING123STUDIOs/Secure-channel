@@ -94,7 +94,7 @@ gets extra scrutiny. Specifically:
   `crypto.subtle.decrypt`, they must also respect this limit — it exists to
   prevent brute-force or timing-analysis attempts against the AES-GCM tag.
 - **Incoming packets must be validated.** `decrypt()` checks `header.dh`
-  (valid base64, 65-byte P-256 uncompressed key), `header.n`/`header.pn`
+   (valid base64, 80–120 bytes — SPKI format, ~91 bytes for P-256), `header.n`/`header.pn`
   (non-negative integers), and `packet.iv` (valid base64, 12 bytes) before
   processing. Any new packet fields must receive the same treatment.
 - **The AAD (associated data) must exactly match what the sender
@@ -152,10 +152,10 @@ gets extra scrutiny. Specifically:
   or plaintext bytes. The garbage collector will eventually reclaim the
   memory, but explicit zeroing reduces the window of vulnerability.
 - **CSP is enforced.** `index.html` includes a Content Security Policy meta
-  tag restricting scripts to `'self'` (plus `'unsafe-inline'` for onclick
-  handlers). Any new script must be loaded via a `<script src>` tag, not
-  injected dynamically. No network requests, iframes, or plugins are
-  permitted by the policy.
+  tag restricting scripts to `'self'` only (no `'unsafe-inline'`). All button
+  handlers are wired via `addEventListener` in `ui.js`. Any new script must be
+  loaded via a `<script src>` tag, not injected dynamically. No network
+  requests, iframes, or plugins are permitted by the policy.
 
 ---
 
@@ -223,8 +223,7 @@ clipboard permissions).
 
 Each file under `js/` is a classic (non-module) script that references
 `document`, `window`, and/or `crypto.subtle` directly, so none of them can
-be `require()`-d as-is. The recommended pattern (used to verify the
-changes in this project so far) is:
+be `require()`-d as-is. The harness pattern:
 
 1. Build a **minimal stub** for `document`/`window`/`navigator` — just
    enough that top-level side effects (the theme IIFE, the
@@ -232,30 +231,36 @@ changes in this project so far) is:
    needs at minimum: `value`, `textContent`, `style.setProperty`, a
    `classList` with `add`/`remove`/`contains`, `appendChild`, and
    `addEventListener`.
-2. Use Node's **global `crypto.subtle`** (Node 19+) directly — it
+2. Use Node's **`crypto.webcrypto`** (available in Node 18+) directly — it
    implements the same algorithms (ECDH P-256, HKDF, HMAC, AES-GCM,
    SHA-256) the browser does, so the real crypto code runs unmodified.
-   Also provide `btoa`/`atob`/`Blob`/`TextEncoder`/`TextDecoder`/`Buffer`
-   in the sandbox.
-3. Run the five `js/` files **concatenated, in load order (`constants.js`,
-   `msg.js`, `crypto-core.js`, `large-payload.js`, `ui.js`), together with test
-   code**, through `vm.runInContext()` as a single script (not separate
-   `vm.Script` runs per file) — this matters because each file uses
-   top-level `let`/`const`/`function`, which are scoped to that one
-   evaluation, the same way separate classic `<script>` tags in a real
-   page share one global lexical scope only when they execute in that
-   same order. Concatenating means the test code can call
-   `RatchetSession`, `bytesToBase64Chunks`, `encodeOpaquePacket`, etc.
-   directly, exactly as if it were a fifth `<script>` tag sharing the
-   page's scope.
-4. `crypto.getRandomValues()` caps at 65536 bytes per call in both the
-   browser and Node — fill larger test buffers in a loop, not one call.
+   Also provide `btoa`/`atob`/`TextEncoder`/`TextDecoder` in the sandbox.
+3. Concatenate the five `js/` files **in load order (`constants.js`,
+   `msg.js`, `crypto-core.js`, `large-payload.js`, `ui.js`)** and run through
+   `vm.runInContext()` as a single script. `class` declarations (like
+   `RatchetSession`) do not become context properties — the harness must
+   expose them by appending `var __RatchetSession = RatchetSession;` to the
+   concatenated source, then destructuring from the context.
+4. `crypto.getRandomValues()` caps at 65536 bytes per call — fill larger
+   test buffers in a loop.
 5. `maskBytes`, `unmaskBytes`, `encodeOpaquePacket`, `decodeOpaquePacket`,
    `encodeOpaquePacketBinary`, `decodeOpaquePacketBinary`,
    `buildLargeExportParts`, and `buildLargeExportPartsBinary` are all
-   `async` (they call `crypto.subtle.digest` internally, once per call
-   for the domain seed) — remember to `await` them in test code, same
-   as production.
+   `async` (they call `crypto.subtle.digest` internally) — remember to
+   `await` them in test code, same as production.
+6. **Initiator/responder ordering** is determined by `compareBytes` on public
+   keys — the party whose key sorts first is the initiator (has `CKs` and
+   can encrypt first). The responder has no sending chain until after
+   receiving the initiator's first message.
+7. **Rate limit**: `DECRYPT_RATE_LIMIT` (2/sec) enforced per session via
+   sliding timestamp window — tests that do rapid-fire decrypts on the
+   same session need to clear `_decryptTimestamps` between calls.
+8. **Cross-realm comparison**: `assert.deepStrictEqual` fails on objects
+   from different vm/host realms even when structurally identical. Use
+   `JSON.stringify` comparison for headers parsed from streaming import.
+9. **Fake Blob**: `blob.slice()` must be **synchronous** (returns a
+   Blob-like with async `.text()` or `.arrayBuffer()`), matching the real
+   Blob API.
 
 ### 6.2 Required automated coverage before merging a crypto/format change
 

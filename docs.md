@@ -92,7 +92,7 @@ window. This mitigates brute-force or timing-analysis attempts against the
 AES-GCM tag.
 
 Incoming packets are validated before processing: `header.dh` is checked for
-valid base64 and correct length (65 bytes for an uncompressed P-256 public
+valid base64 and correct length (80–120 bytes — SPKI format, ~91 bytes for P-256 public
 key), `header.n` and `header.pn` must be non-negative integers, and
 `packet.iv` must be valid base64 decoding to exactly 12 bytes.
 
@@ -371,9 +371,9 @@ safety net.
 ### `index.html`
 Structure only: the info panel, the four numbered panels (Key Generation,
 Shared Secret, Encrypt, Decrypt), and the footer. All interactivity is
-wired via `onclick` handlers calling into the `js/` scripts. Includes a
-Content Security Policy meta tag restricting scripts to `'self'` and
-blocking network requests, iframes, and plugins. Note that `cipherOut`,
+wired via `addEventListener` bindings in `ui.js`, keeping the CSP free of
+`'unsafe-inline'`. Includes a Content Security Policy meta tag restricting
+scripts to `'self'` and blocking network requests, iframes, and plugins. Note that `cipherOut`,
 `plainOut`, and `privKeyOut` are *result* boxes — they only
 get Copy/Export controls (or inline confirmations), not Import, since
 importing a file into an output space doesn't make sense. Only genuine

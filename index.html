@@ -20,7 +20,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8" />
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'none'; frame-src 'none'; object-src 'none'; base-uri 'self'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'none'; frame-src 'none'; object-src 'none'; base-uri 'self'; form-action 'none'">
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
 <title>Secure Channel Assistant v4</title>
 <link rel="stylesheet" href="style.css">
@@ -38,7 +38,7 @@
     ⚡ <b>A</b>ssistant<br>
     <span class="small">Privacy-focused Encryption Tool</span>
   </h1>
-  <button class="iconbtn" id="themeToggleBtn" onclick="toggleTheme()"
+  <button class="iconbtn" id="themeToggleBtn"
     title="Toggle light/dark mode" aria-label="Toggle light/dark mode">🌙 Dark</button>
 </div>
 
@@ -64,17 +64,17 @@
   <h3>1. Key Generation 🔑</h3>
 
   <div class="btnrow">
-    <button onclick="generateKeys()">✨ Generate Key Pair</button>
-    <button class="iconbtn" onclick="exportIdentity()">⬇️ Export Identity (backup)</button>
-    <button class="iconbtn" onclick="importIdentity()">⬆️ Import Identity (restore)</button>
+    <button id="generateKeysBtn">✨ Generate Key Pair</button>
+    <button class="iconbtn" id="exportIdentityBtn">⬇️ Export Identity (backup)</button>
+    <button class="iconbtn" id="importIdentityBtn">⬆️ Import Identity (restore)</button>
   </div>
 
   <div class="field">
     <label class="small" for="pubKey">📢 Public Key (safe to share)</label>
     <textarea id="pubKey" readonly></textarea>
     <div class="btnrow">
-      <button class="iconbtn" onclick="copyBox('pubKey')" title="Copy">📋 Copy</button>
-      <button class="iconbtn" onclick="exportTextBox('pubKey','my-public-key.txt')" title="Export as file">⬇️ Export</button>
+      <button class="iconbtn" id="copyPubKeyBtn" title="Copy">📋 Copy</button>
+      <button class="iconbtn" id="exportPubKeyBtn" title="Export as file">⬇️ Export</button>
     </div>
     <div class="small" id="myFingerprintLabel">Fingerprint (yours):</div>
     <div class="fingerprint" id="myFingerprint" role="status" aria-labelledby="myFingerprintLabel">Generate keys to see this</div>
@@ -84,9 +84,9 @@
     <label class="small" for="privKey">🔐 Private Key (🚫 never share this)</label>
     <input id="privKey" type="password" readonly />
     <div class="btnrow">
-      <button class="iconbtn" onclick="togglePriv()" title="Show/hide" aria-label="Show or hide private key"><span class="eye-icon" id="eyeIcon">👁️</span> <span id="toggleLabel">Show</span></button>
-      <button class="iconbtn" onclick="copyBox('privKey')" title="Copy">📋 Copy</button>
-      <button class="iconbtn" onclick="exportTextBox('privKey','my-private-key.txt', true)" title="Export as file">⬇️ Export</button>
+      <button class="iconbtn" id="togglePrivBtn" title="Show/hide" aria-label="Show or hide private key"><span class="eye-icon" id="eyeIcon">👁️</span> <span id="toggleLabel">Show</span></button>
+      <button class="iconbtn" id="copyPrivKeyBtn" title="Copy">📋 Copy</button>
+      <button class="iconbtn" id="exportPrivKeyBtn" title="Export as file">⬇️ Export</button>
     </div>
     <pre id="privKeyOut" aria-live="polite"></pre>
   </div>
@@ -100,19 +100,19 @@
     <label class="small" for="peerKey">📥 Peer's public key</label>
     <textarea id="peerKey" placeholder="Paste peer public key"></textarea>
     <div class="btnrow">
-      <button class="iconbtn" onclick="copyBox('peerKey')" title="Copy">📋 Copy</button>
-      <button class="iconbtn paste-btn" onclick="pasteInputField('peerKey')" title="Paste from clipboard">📋 Paste</button>
-      <button class="iconbtn" onclick="exportTextBox('peerKey','peer-public-key.txt')" title="Export as file">⬇️ Export</button>
-      <button class="iconbtn" onclick="importIntoTextarea('peerKey')" title="Import from file">⬆️ Import</button>
-      <button class="iconbtn clear-btn" onclick="clearInputField('peerKey')" title="Clear">✕ Clear</button>
+      <button class="iconbtn" id="copyPeerKeyBtn" title="Copy">📋 Copy</button>
+      <button class="iconbtn paste-btn" id="pastePeerKeyBtn" title="Paste from clipboard">📋 Paste</button>
+      <button class="iconbtn" id="exportPeerKeyBtn" title="Export as file">⬇️ Export</button>
+      <button class="iconbtn" id="importPeerKeyBtn" title="Import from file">⬆️ Import</button>
+      <button class="iconbtn clear-btn" id="clearPeerKeyBtn" title="Clear">✕ Clear</button>
     </div>
     <div class="small" id="peerFingerprintLabel">Fingerprint (peer's), once entered:</div>
     <div class="fingerprint" id="peerFingerprint" role="status" aria-labelledby="peerFingerprintLabel">Paste a peer key to see this</div>
   </div>
 
   <div class="btnrow">
-    <button onclick="derive()">🔗 Create Shared Secret</button>
-    <button class="danger-btn" onclick="resetSessionUI()">🔄 Reset Session</button>
+    <button id="deriveBtn">🔗 Create Shared Secret</button>
+    <button class="danger-btn" id="resetSessionBtn">🔄 Reset Session</button>
   </div>
 
   <pre id="status" aria-live="polite">⏳ Waiting for setup...</pre>
@@ -133,19 +133,19 @@
     <div class="field">
       <textarea id="msg" placeholder="Type a message, or import any file below (text, image, anything)..."></textarea>
       <div class="btnrow">
-        <button class="iconbtn" onclick="copyBox('msg')" title="Copy">📋 Copy</button>
-        <button class="iconbtn paste-btn" onclick="pasteInputField('msg')" title="Paste from clipboard">📋 Paste</button>
-        <button class="iconbtn" onclick="exportMsgBox()" title="Export">⬇️ Export</button>
-        <button class="iconbtn" onclick="importMsgBox()" title="Import any file">⬆️ Import</button>
-        <button class="iconbtn clear-btn" onclick="clearInputField('msg')" title="Clear">✕ Clear</button>
+        <button class="iconbtn" id="copyMsgBtn" title="Copy">📋 Copy</button>
+        <button class="iconbtn paste-btn" id="pasteMsgBtn" title="Paste from clipboard">📋 Paste</button>
+        <button class="iconbtn" id="exportMsgBtn" title="Export">⬇️ Export</button>
+        <button class="iconbtn" id="importMsgBtn" title="Import any file">⬆️ Import</button>
+        <button class="iconbtn clear-btn" id="clearMsgBtn" title="Clear">✕ Clear</button>
       </div>
     </div>
-    <button onclick="doEncrypt()">🚀 Encrypt</button>
+    <button id="encryptBtn">🚀 Encrypt</button>
     <div class="field">
       <pre id="cipherOut" aria-live="polite"></pre>
       <div class="btnrow">
-        <button class="iconbtn" onclick="copyBox('cipherOut')" title="Copy">📋 Copy</button>
-        <button class="iconbtn" onclick="exportTextBox('cipherOut','encrypted-message.bin')" title="Export">⬇️ Export</button>
+        <button class="iconbtn" id="copyCipherOutBtn" title="Copy">📋 Copy</button>
+        <button class="iconbtn" id="exportCipherOutBtn" title="Export">⬇️ Export</button>
       </div>
     </div>
   </div>
@@ -155,19 +155,19 @@
     <div class="field">
       <textarea id="cipherIn" placeholder="Paste encrypted message"></textarea>
       <div class="btnrow">
-        <button class="iconbtn" onclick="copyBox('cipherIn')" title="Copy">📋 Copy</button>
-        <button class="iconbtn paste-btn" onclick="pasteInputField('cipherIn')" title="Paste from clipboard">📋 Paste</button>
-        <button class="iconbtn" onclick="exportTextBox('cipherIn','encrypted-message.bin')" title="Export">⬇️ Export</button>
-        <button class="iconbtn" onclick="importIntoTextarea('cipherIn')" title="Import">⬆️ Import</button>
-        <button class="iconbtn clear-btn" onclick="clearInputField('cipherIn')" title="Clear">✕ Clear</button>
+        <button class="iconbtn" id="copyCipherInBtn" title="Copy">📋 Copy</button>
+        <button class="iconbtn paste-btn" id="pasteCipherInBtn" title="Paste from clipboard">📋 Paste</button>
+        <button class="iconbtn" id="exportCipherInBtn" title="Export">⬇️ Export</button>
+        <button class="iconbtn" id="importCipherInBtn" title="Import">⬆️ Import</button>
+        <button class="iconbtn clear-btn" id="clearCipherInBtn" title="Clear">✕ Clear</button>
       </div>
     </div>
-    <button onclick="doDecrypt()">🧪 Decrypt</button>
+    <button id="decryptBtn">🧪 Decrypt</button>
     <div class="field">
       <pre id="plainOut" aria-live="polite"></pre>
       <div class="btnrow">
-        <button class="iconbtn" onclick="copyBox('plainOut')" title="Copy">📋 Copy</button>
-        <button class="iconbtn" onclick="exportPlainOut()" title="Export (restores original file if applicable)">⬇️ Export</button>
+        <button class="iconbtn" id="copyPlainOutBtn" title="Copy">📋 Copy</button>
+        <button class="iconbtn" id="exportPlainOutBtn" title="Export (restores original file if applicable)">⬇️ Export</button>
       </div>
     </div>
   </div>
