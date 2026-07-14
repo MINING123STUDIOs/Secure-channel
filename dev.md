@@ -52,8 +52,8 @@ without an explicit, deliberate decision (and a note in `docs.md`):
   mask within `constants.js`, or low-level crypto vs. the ratchet class
   within `crypto-core.js`). Put new code in the right file and the right
   section within it, or add a new banner if it's genuinely a new concern —
-  don't bury unrelated logic inside an existing section, and don't add a
-  fifth top-level file without a clear reason (see §6 in `docs.md` for
+   don't bury unrelated logic inside an existing section, and don't add a
+   sixth top-level file without a clear reason (see §6 in `docs.md` for
   what belongs where and in what load order).
 - **Constants at the top, not inline.** Any new size threshold, timeout,
   or limit belongs next to `CHUNK_BYTES` / `DISPLAY_THRESHOLD` /
@@ -178,6 +178,13 @@ gets extra scrutiny. Specifically:
   (see §1) — use `showConfirmWarning()` for inline UI (not browser
   `confirm()`); the private key field itself should stay masked by default
   on every code path.
+- **Accessibility (WCAG 2.1 AA).** Every form control (`<textarea>`,
+  `<input>`) must have an associated `<label>` via `for`/`id`. Output
+  elements (`<pre>`) and dynamic regions (status, fingerprints, result
+  boxes) use `aria-live="polite"` so screen readers announce changes.
+  Fingerprint `<div>`s use `role="status"` with `aria-labelledby` linking
+  to their description. Emoji-only buttons must carry an `aria-label`.
+  The page uses a `<main>` landmark. Never use `<p>` inside `<h1>`.
 
 ---
 
@@ -207,8 +214,8 @@ changes in this project so far) is:
    SHA-256) the browser does, so the real crypto code runs unmodified.
    Also provide `btoa`/`atob`/`Blob`/`TextEncoder`/`TextDecoder`/`Buffer`
    in the sandbox.
-3. Run the four `js/` files **concatenated, in load order (`constants.js`,
-   `crypto-core.js`, `large-payload.js`, `ui.js`), together with test
+3. Run the five `js/` files **concatenated, in load order (`constants.js`,
+   `msg.js`, `crypto-core.js`, `large-payload.js`, `ui.js`), together with test
    code**, through `vm.runInContext()` as a single script (not separate
    `vm.Script` runs per file) — this matters because each file uses
    top-level `let`/`const`/`function`, which are scoped to that one
@@ -324,6 +331,10 @@ shipping a UI or large-file change:
 - [ ] With OS-level "reduce motion" enabled, confirm the progress
       indicator's spin/pulse animations are suppressed but the label/
       percentage text is still legible and updating.
+- [ ] Run a screen reader (or browser accessibility inspector) — every
+      form field should be announced with its label, dynamic output
+      regions should announce changes, and no emoji-only button should
+      be unlabeled.
 
 ### 6.4 Before opening a PR
 

@@ -7,7 +7,7 @@ export the encrypted result to your contact through whatever channel you
 already use (email, chat, a shared doc, anything).
 
 Files: `index.html` (structure), `style.css` (styling, light/dark themes),
-and four scripts under `js/` — `constants.js`, `crypto-core.js`,
+and five scripts under `js/` — `constants.js`, `msg.js`, `crypto-core.js`,
 `large-payload.js`, `ui.js` — loaded in that order (all logic: crypto,
 UI wiring, import/export). See §6 for what lives in each.
 
@@ -88,9 +88,10 @@ memory growth.
 ### 2.3 Fingerprints
 
 - **Your fingerprint** and **their fingerprint** (once you paste their key)
-  are each just a SHA-256 hash of that single public key, formatted as
-  hex in 4-character groups (`fingerprintOf`).
-- The **session fingerprint** is a SHA-256 hash of *both* raw public keys
+  are each a SHA-512 hash of that single public key, displayed as two lines:
+  the first 256 bits on line 1, and the last 256 bits in `[brackets]` on
+  line 2 (`fingerprintOf`).
+- The **session fingerprint** is a SHA-512 hash of *both* raw public keys
   concatenated in a fixed (sorted) order, so it comes out identical on both
   ends (`sessionFingerprintOf`).
 - Read the session fingerprint aloud to your contact over a channel you
@@ -363,6 +364,15 @@ importing a file into an output space doesn't make sense. Only genuine
 input fields (`peerKey`, `msg`, `cipherIn`, plus the identity-level
 Import Identity) offer Import.
 
+**Accessibility:** all form controls have `<label>` elements with
+`for`/`id` associations. Dynamic output regions (`#status`, `#cipherOut`,
+`#plainOut`, `#privKeyOut`, `#sessionFingerprintField`) carry
+`aria-live="polite"` so screen readers announce content changes.
+Fingerprint displays use `role="status"` with `aria-labelledby` pointing
+to their descriptive `<div>`. Emoji-only buttons (theme toggle, eye icon)
+have `aria-label` attributes. The page content is wrapped in a `<main>`
+landmark.
+
 ### `style.css`
 CSS custom properties (`:root` / `[data-theme="light"]`) drive both the
 dark and light themes — everything from panel backgrounds to the danger/
@@ -386,7 +396,11 @@ that file was already organized into internally:
   `fillPseudorandomStream`/`encodeOpaquePacket`/`decodeOpaquePacket`/`encodeOpaquePacketBinary`/`decodeOpaquePacketBinary`, §3.1),
   binary format magic constants (`BIN_MAGIC_SMALL`/`BIN_MAGIC_LARGE`),
   and base64/byte utilities (`b64`, `unb64`, `bytesEqual`, `compareBytes`,
-  `concatBytes`). No dependencies on the other three files.
+  `concatBytes`). No dependencies on the other files.
+- **`msg.js`** — all user-facing strings (error messages, status messages,
+  confirmation warnings, button labels, progress labels) extracted into
+  named constants. No dependencies on other files; loaded after
+  `constants.js` but before `crypto-core.js`.
 - **`crypto-core.js`** — `generateIdentityKeyPair`, `generateDHKeyPair`,
   `dh`, `kdfRK`, `kdfCK`, `deriveMessageAesKey`, `fingerprintOf`,
   `computeInitialSharedSecret`, and the `RatchetSession` class
@@ -401,7 +415,7 @@ that file was already organized into internally:
   `Progress` indicator module, status/copy/export/import helpers, key
   generation & identity import/export, the show/hide toggle, and the
   top-level `doEncrypt`/`doDecrypt` handlers that tie everything together.
-  Depends on all three files above.
+  Depends on all four files above.
 
 These are loaded as plain classic `<script>` tags (no bundler, no
 `type="module"`), so — same as one big file — they share a single global

@@ -27,11 +27,18 @@
 
 <body>
 
+<main>
 <div class="container">
 
 <div class="topbar">
-  <h1>🔐 <b>S</b>ecure <br>🔑 <b>C</b>hannel <br>⚡ <b>A</b>ssistant<br><p class="small">Privacy-focused Encryption Tool</p></h1>
-  <button class="iconbtn" id="themeToggleBtn" onclick="toggleTheme()" title="Toggle light/dark mode">🌙 Dark</button>
+  <h1>
+    🔐 <b>S</b>ecure <br>
+    🔑 <b>C</b>hannel <br>
+    ⚡ <b>A</b>ssistant<br>
+    <span class="small">Privacy-focused Encryption Tool</span>
+  </h1>
+  <button class="iconbtn" id="themeToggleBtn" onclick="toggleTheme()"
+    title="Toggle light/dark mode" aria-label="Toggle light/dark mode">🌙 Dark</button>
 </div>
 
 <!-- INFO PANEL -->
@@ -44,11 +51,11 @@
   <p><b>3. Paste their public key</b> and create the shared secret. Both of you do this once, using each other's public key.</p>
   <p><b>4. Encrypt, send, decrypt.</b> Type a message (or import any file, for example text, image, whatever), encrypt it, and copy the result to your contact through any channel you like. They paste it into Decrypt to read it.</p>
 
-  <p class="small">📨 <b>This tool does <b>NOT</b> send anything for you!</b> It only locks and unlocks messages. You copy the encrypted text to your contact yourself.</p>
+  <p class="small">📨 <b>This tool does NOT send anything for you!</b> It only locks and unlocks messages. You copy the encrypted text to your contact yourself.</p>
   <p class="small">🔁 Every message uses a fresh key, and the two of you re-key on every reply so even if one message's key were ever exposed, it wouldn't expose past <i>or</i> future messages. See the notes in the Shared Secret panel for details.</p>
   <p class="small">⚠️ <b>Refreshing or closing this page erases everything</b> including your keys, your session, all of it. There's no account and no cloud backup. Use <b>Export Identity</b> below <i>before</i> you refresh if you want to pick this conversation back up later. Once you've generated keys, your browser will also ask you to confirm before leaving the page, as a safety net.</p>
   <p class="small">🔍 <b>Fingerprints</b> let you verify you're really talking to the right person (and not someone in the middle). Read the Session Fingerprint aloud to your contact over a trusted channel (a phone call, in person). If it matches on both screens, your connection is genuine.</p>
-  <p class="small">🔒 For best possible security it is recommended to download the source files to your device and run the tool offline after verifying the program.</p>
+  <p class="small">🔒 For best possible security, it is recommended to download the source files to your device and run the tool offline after verifying the program. This is also highly recommended for compatibility reasons.</p>
 </div>
 
 <!-- KEYS -->
@@ -62,25 +69,25 @@
   </div>
 
   <div class="field">
-    <div class="small">📢 Public Key (safe to share)</div>
+    <label class="small" for="pubKey">📢 Public Key (safe to share)</label>
     <textarea id="pubKey" readonly></textarea>
     <div class="btnrow">
       <button class="iconbtn" onclick="copyBox('pubKey')" title="Copy">📋 Copy</button>
       <button class="iconbtn" onclick="exportTextBox('pubKey','my-public-key.txt')" title="Export as file">⬇️ Export</button>
     </div>
-    <div class="small">Fingerprint (yours):</div>
-    <div class="fingerprint" id="myFingerprint">Generate keys to see this</div>
+    <div class="small" id="myFingerprintLabel">Fingerprint (yours):</div>
+    <div class="fingerprint" id="myFingerprint" role="status" aria-labelledby="myFingerprintLabel">Generate keys to see this</div>
   </div>
 
   <div class="field">
-    <div class="small">🔐 Private Key (🚫 never share this)</div>
+    <label class="small" for="privKey">🔐 Private Key (🚫 never share this)</label>
     <input id="privKey" type="password" readonly />
     <div class="btnrow">
-      <button class="iconbtn" onclick="togglePriv()" title="Show/hide"><span class="eye-icon" id="eyeIcon">👁️</span> <span id="toggleLabel">Show</span></button>
+      <button class="iconbtn" onclick="togglePriv()" title="Show/hide" aria-label="Show or hide private key"><span class="eye-icon" id="eyeIcon">👁️</span> <span id="toggleLabel">Show</span></button>
       <button class="iconbtn" onclick="copyBox('privKey')" title="Copy">📋 Copy</button>
       <button class="iconbtn" onclick="exportTextBox('privKey','my-private-key.txt', true)" title="Export as file">⬇️ Export</button>
     </div>
-    <pre id="privKeyOut"></pre>
+    <pre id="privKeyOut" aria-live="polite"></pre>
   </div>
 </div>
 
@@ -89,7 +96,7 @@
   <h3>2. Shared Secret 🤝</h3>
 
   <div class="field">
-    <div class="small">📥 Peer's public key</div>
+    <label class="small" for="peerKey">📥 Peer's public key</label>
     <textarea id="peerKey" placeholder="Paste peer public key"></textarea>
     <div class="btnrow">
       <button class="iconbtn" onclick="copyBox('peerKey')" title="Copy">📋 Copy</button>
@@ -98,8 +105,8 @@
       <button class="iconbtn" onclick="importIntoTextarea('peerKey')" title="Import from file">⬆️ Import</button>
       <button class="iconbtn clear-btn" onclick="clearInputField('peerKey')" title="Clear">✕ Clear</button>
     </div>
-    <div class="small">Fingerprint (peer's), once entered:</div>
-    <div class="fingerprint" id="peerFingerprint">Paste a peer key to see this</div>
+    <div class="small" id="peerFingerprintLabel">Fingerprint (peer's), once entered:</div>
+    <div class="fingerprint" id="peerFingerprint" role="status" aria-labelledby="peerFingerprintLabel">Paste a peer key to see this</div>
   </div>
 
   <div class="btnrow">
@@ -107,11 +114,11 @@
     <button class="danger-btn" onclick="resetSessionUI()">🔄 Reset Session</button>
   </div>
 
-  <pre id="status">⏳ Waiting for setup...</pre>
+  <pre id="status" aria-live="polite">⏳ Waiting for setup...</pre>
 
-  <div class="field" id="sessionFingerprintField" style="display:none;">
-    <div class="small">🔍 Session Fingerprint (read this aloud to your contact to confirm you're both connected to each other, not an impostor):</div>
-    <div class="fingerprint" id="sessionFingerprint">—</div>
+  <div class="field" id="sessionFingerprintField" style="display:none;" aria-live="polite">
+    <div class="small" id="sessionFingerprintLabel">🔍 Session Fingerprint (read this aloud to your contact to confirm you're both connected to each other, not an impostor):</div>
+    <div class="fingerprint" id="sessionFingerprint" aria-labelledby="sessionFingerprintLabel">—</div>
   </div>
 
   <p class="small">📝 <b>How the forward security works:</b> every reply performs a fresh Diffie-Hellman exchange (a real double ratchet, the same design used by Signal), and every individual message advances a one-way hash chain on top of that. In a normal back-and-forth conversation this means a fresh ECDH computation on effectively every message. A single leaked message key never exposes any other message, and if your device were ever compromised, the very next exchange re-secures the conversation going forward.</p>
@@ -123,6 +130,7 @@
   <div>
     <h3>3. Encrypt ✉️🔒</h3>
     <div class="field">
+    <label class="small" for="msg">📝 Message input</label>
       <textarea id="msg" placeholder="Type a message, or import any file below (text, image, anything)..."></textarea>
       <div class="btnrow">
         <button class="iconbtn" onclick="copyBox('msg')" title="Copy">📋 Copy</button>
@@ -134,7 +142,7 @@
     </div>
     <button onclick="doEncrypt()">🚀 Encrypt</button>
     <div class="field">
-      <pre id="cipherOut"></pre>
+      <pre id="cipherOut" aria-live="polite"></pre>
       <div class="btnrow">
         <button class="iconbtn" onclick="copyBox('cipherOut')" title="Copy">📋 Copy</button>
         <button class="iconbtn" onclick="exportTextBox('cipherOut','encrypted-message.bin')" title="Export">⬇️ Export</button>
@@ -145,6 +153,7 @@
   <div>
     <h3>4. Decrypt 📩🔓</h3>
     <div class="field">
+      <label class="small" for="cipherIn">Paste encrypted message</label>
       <textarea id="cipherIn" placeholder="Paste encrypted message"></textarea>
       <div class="btnrow">
         <button class="iconbtn" onclick="copyBox('cipherIn')" title="Copy">📋 Copy</button>
@@ -156,7 +165,7 @@
     </div>
     <button onclick="doDecrypt()">🧪 Decrypt</button>
     <div class="field">
-      <pre id="plainOut"></pre>
+      <pre id="plainOut" aria-live="polite"></pre>
       <div class="btnrow">
         <button class="iconbtn" onclick="copyBox('plainOut')" title="Copy">📋 Copy</button>
         <button class="iconbtn" onclick="exportPlainOut()" title="Export (restores original file if applicable)">⬇️ Export</button>
@@ -165,12 +174,18 @@
   </div>
 
 </div>
+</main>
 
-<footer>© MINING123STUDIOS 2026 &middot; Licensed under GPL-3.0<br>This software is provided "as is", without warranty of any kind, express or implied.<br>In no event shall the authors be liable for any claim, damages or other liability.<br><a href="https://github.com/MINING123STUDIOs/Secure-channel/tree/main">Source Code (Github)</a></footer>
-
-</div>
+<footer>
+  © MINING123STUDIOS 2026 &middot; Licensed under GPL-3.0<br>
+  This software is provided "as is", without warranty of any kind, express or implied.<br>
+  In no event shall the authors be liable for any claim, damages or other liability.<br>
+  <a href="https://github.com/MINING123STUDIOS/Secure-channel/tree/main"
+    target="_blank">Source Code on GitHub (opens in new tab)</a>
+</footer>
 
 <script src="js/constants.js"></script>
+<script src="js/msg.js"></script>
 <script src="js/crypto-core.js"></script>
 <script src="js/large-payload.js"></script>
 <script src="js/ui.js"></script>

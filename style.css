@@ -140,26 +140,13 @@ pre {
   padding: 10px;
 
   overflow-wrap: anywhere;
-  word-break: break-word;
+  word-break: break-all;
 }
 
-/* Clear button for input fields */
-.clear-btn {
-  background: var(--iconbtn-bg);
-  color: var(--text);
-  transition: background 0.15s ease, color 0.15s ease;
-}
-
+/* Clear / Paste buttons — inherit .iconbtn look, override only hover colour */
 .clear-btn:hover {
   background: var(--danger);
   color: white;
-}
-
-/* Paste button for input fields */
-.paste-btn {
-  background: var(--iconbtn-bg);
-  color: var(--text);
-  transition: background 0.15s ease, color 0.15s ease;
 }
 
 .paste-btn:hover {
@@ -169,8 +156,8 @@ pre {
 
 pre {
   white-space: pre-wrap;
-  word-break: break-word;
   overflow-wrap: anywhere;
+  word-break: break-all;
   max-height: 260px;
   overflow-y: auto;
 }
@@ -259,24 +246,6 @@ button:disabled {
   margin-top: 8px;
 }
 
-.confirm-row .confirm-yes {
-  background: var(--accent);
-  color: white;
-}
-.confirm-row .confirm-yes:hover {
-  background: var(--accent-hover);
-}
-
-.confirm-row .confirm-no {
-  background: transparent;
-  border: 1px solid var(--danger);
-  color: var(--danger);
-}
-.confirm-row .confirm-no:hover {
-  background: var(--danger);
-  color: white;
-}
-
 .danger-btn {
   background: transparent;
   border: 1px solid var(--danger);
@@ -296,7 +265,7 @@ button:disabled {
   padding: 8px 10px;
   color: var(--text);
   letter-spacing: 0.5px;
-  word-break: break-all;
+  white-space: pre-wrap;
 }
 
 /* Eye icon on the private-key Show/Hide button: a diagonal line is
@@ -380,15 +349,26 @@ footer {
 .progress-ring {
   --pct: 25;
   position: relative;
-  width: 24px;
-  height: 24px;
+  width: 26px;
+  height: 26px;
   border-radius: 50%;
   flex-shrink: 0;
   background: conic-gradient(var(--accent) calc(var(--pct) * 1%), transparent 0);
   -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 3px), #000 calc(100% - 3px));
           mask: radial-gradient(farthest-side, transparent calc(100% - 3px), #000 calc(100% - 3px));
-  filter: drop-shadow(0 0 4px color-mix(in srgb, var(--accent) 55%, transparent));
   animation: progress-spin 0.9s cubic-bezier(0.6, 0, 0.4, 1) infinite;
+}
+/* Inner ring — counter-rotates for a more dynamic look (inspired by
+   LoadLab's reverse-spinner). Only visual; doesn't affect progress. */
+.progress-ring::before {
+  content: '';
+  position: absolute;
+  inset: 2px;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  border-top-color: var(--accent);
+  border-right-color: color-mix(in srgb, var(--accent) 50%, transparent);
+  animation: progress-spin-reverse 1.2s linear infinite;
 }
 .progress-ring.determinate {
   /* Slower, linear sweep once the fill reflects real progress —
@@ -397,20 +377,14 @@ footer {
   animation: progress-spin 2.4s linear infinite;
   transition: background 0.2s ease;
 }
-.progress-ring::after {
-  content: '';
-  position: absolute;
-  inset: -4px;
-  border-radius: 50%;
-  background: radial-gradient(circle, color-mix(in srgb, var(--accent) 32%, transparent) 0%, transparent 72%);
-  animation: progress-pulse 1.8s ease-in-out infinite;
+.progress-ring.determinate::before {
+  animation: progress-spin-reverse 1.8s linear infinite;
 }
 @keyframes progress-spin {
   to { transform: rotate(360deg); }
 }
-@keyframes progress-pulse {
-  0%, 100% { opacity: 0.3; }
-  50% { opacity: 0.8; }
+@keyframes progress-spin-reverse {
+  to { transform: rotate(-360deg); }
 }
 
 .progress-label {
@@ -428,7 +402,7 @@ footer {
 
 @media (prefers-reduced-motion: reduce) {
   .progress-ring,
-  .progress-ring::after {
+  .progress-ring::before {
     animation: none;
   }
 }
