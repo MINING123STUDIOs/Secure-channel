@@ -352,8 +352,9 @@ shipping a UI or large-file change:
 - [ ] Private key actions (Show/Hide, Copy, Export, Export Identity) each
       show an inline confirmation in `privKeyOut` (no browser `confirm()`).
       Triggering a second confirmation on the same output element should
-      cancel the first one. Reset Session also shows an inline confirmation
-      in `cipherOut`.
+      cancel the first one. Generate Key Pair also shows an inline
+      confirmation in `privKeyOut` when keys already exist. Reset Session
+      also shows an inline confirmation in `cipherOut`.
 - [ ] Resize to a mobile-width viewport — the `.row` two-column layout
       should collapse to one column (`@media (max-width: 800px)`).
 - [ ] With OS-level "reduce motion" enabled, confirm the progress

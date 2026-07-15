@@ -20,7 +20,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8" />
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'none'; frame-src 'none'; object-src 'none'; base-uri 'self'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'; connect-src 'none'; frame-src 'none'; object-src 'none'; base-uri 'self'; form-action 'none'">
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
 <title>Secure Channel Assistant v4</title>
 <link rel="stylesheet" href="style.css">
@@ -71,7 +71,7 @@
 
   <div class="field">
     <label class="small" for="pubKey">📢 Public Key (safe to share)</label>
-    <textarea id="pubKey" readonly></textarea>
+    <textarea id="pubKey" readonly autocomplete="off"></textarea>
     <div class="btnrow">
       <button class="iconbtn" id="copyPubKeyBtn" title="Copy">📋 Copy</button>
       <button class="iconbtn" id="exportPubKeyBtn" title="Export as file">⬇️ Export</button>
@@ -98,7 +98,7 @@
 
   <div class="field">
     <label class="small" for="peerKey">📥 Peer's public key</label>
-    <textarea id="peerKey" placeholder="Paste peer public key"></textarea>
+    <textarea id="peerKey" placeholder="Paste peer public key" autocomplete="off"></textarea>
     <div class="btnrow">
       <button class="iconbtn" id="copyPeerKeyBtn" title="Copy">📋 Copy</button>
       <button class="iconbtn paste-btn" id="pastePeerKeyBtn" title="Paste from clipboard">📋 Paste</button>
@@ -117,7 +117,7 @@
 
   <pre id="status" aria-live="polite">⏳ Waiting for setup...</pre>
 
-  <div class="field" id="sessionFingerprintField" style="display:none;" aria-live="polite">
+  <div class="field hidden" id="sessionFingerprintField" aria-live="polite">
     <div class="small" id="sessionFingerprintLabel">🔍 Session Fingerprint (read this aloud to your contact to confirm you're both connected to each other, not an impostor):</div>
     <div class="fingerprint" id="sessionFingerprint" aria-labelledby="sessionFingerprintLabel">—</div>
   </div>
@@ -131,7 +131,7 @@
   <div>
     <h3>3. Encrypt ✉️🔒</h3>
     <div class="field">
-      <textarea id="msg" placeholder="Type a message, or import any file below (text, image, anything)..."></textarea>
+      <textarea id="msg" placeholder="Type a message, or import any file below (text, image, anything)..." autocomplete="off"></textarea>
       <div class="btnrow">
         <button class="iconbtn" id="copyMsgBtn" title="Copy">📋 Copy</button>
         <button class="iconbtn paste-btn" id="pasteMsgBtn" title="Paste from clipboard">📋 Paste</button>
@@ -153,7 +153,7 @@
   <div>
     <h3>4. Decrypt 📩🔓</h3>
     <div class="field">
-      <textarea id="cipherIn" placeholder="Paste encrypted message"></textarea>
+      <textarea id="cipherIn" placeholder="Paste encrypted message" autocomplete="off"></textarea>
       <div class="btnrow">
         <button class="iconbtn" id="copyCipherInBtn" title="Copy">📋 Copy</button>
         <button class="iconbtn paste-btn" id="pasteCipherInBtn" title="Paste from clipboard">📋 Paste</button>

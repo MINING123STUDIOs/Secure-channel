@@ -336,7 +336,8 @@ on very large files.
    password field — click **Show** (with an inline confirmation) to reveal
    it temporarily, or **Copy**/**Export** it (also confirmed) using the
    JS variable directly. A new confirmation on the same output area cancels
-   the previous one.
+   the previous one. If keys already exist, Generate Key Pair shows a
+   confirmation warning before replacing them.
 2. **Share only your public key** with your contact, and paste theirs into
    **Peer's public key**. Both of you do this once.
 3. **Create Shared Secret.** Derives the session. The status line and the
@@ -457,6 +458,39 @@ you skip verifying the session fingerprint out-of-band*; loss of your
 private key (no recovery — that's what Export Identity is for); an attacker
 who has this source code and therefore knows `ENVELOPE_SEED` (§3.1 is not a
 secret); formal cryptographic audit (this hasn't had one).
+
+---
+
+## Known Limitations (JavaScript)
+
+These are inherent to the language — no workaround exists without changing
+the runtime (e.g., moving to a native binary or WebAssembly module).
+
+**1. `secureClear` may be optimized away (L1).**
+V8 and SpiderMonkey can eliminate `.fill(0)` on buffers that are not
+subsequently read (dead-store elimination). There is no `SecureZeroMemory`
+equivalent in JavaScript. The zeroing is best-effort — it does the right
+thing conceptually, but the compiler may remove it. CryptoKey objects
+(returned by Web Crypto `deriveKey`) are opaque — `secureClear` cannot
+touch their internal material at all; they are cleared only when the
+garbage collector reclaims them (timing non-deterministic). The private
+key is also held as an immutable JS string (`myPrivKeyB64`), which
+cannot be zeroed at all (L3) — it persists in the heap until garbage
+collected.
+
+**2. `compareBytes` is not constant-time (L2).**
+The function finds the first differing byte via a data-dependent branch.
+This is only used for comparing public keys (which are public), never for
+secret material, so the timing side-channel is not exploitable in current
+usage. If future code needs byte comparison on secrets, use a
+constant-time alternative (e.g., accumulate XOR differences in a register
+and check at the end).
+
+**3. Private key held as JS string (L3).**
+JavaScript strings are immutable. When `myPrivKeyB64` is reassigned, the
+old string remains in the heap until the garbage collector reclaims it.
+The `b64()`/`unb64()` helpers also create intermediate binary strings
+that cannot be zeroed. This is unavoidable in pure JS.
 
 ---
 

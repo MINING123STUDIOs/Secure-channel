@@ -313,7 +313,7 @@ footer {
 }
 
 /* ---------- Progress overlay (large-file operations) ----------
-   A single floating pill, created lazily by script.js, used for any
+   A single floating pill, created lazily by ui.js, used for any
    operation that touches a large payload (reading/encrypting/
    decrypting/importing). Two visual modes:
    - indeterminate: shown immediately, before we know how long the
@@ -406,6 +406,8 @@ footer {
     animation: none;
   }
 }
+
+.hidden { display: none; }
 
 /* MOBILE */
 @media (max-width: 800px) {
