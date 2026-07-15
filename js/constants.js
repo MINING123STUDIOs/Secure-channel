@@ -1,5 +1,5 @@
 /*
- * Secure Channel Assistant — end-to-end encrypted messaging demo with a
+ * Secure Channel Assistant — end-to-end encrypted messaging with a
  * Double Ratchet (Signal-style) key exchange.
  * Copyright (C) 2026 MINING123STUDIOS
  *

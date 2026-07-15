@@ -1,5 +1,5 @@
 /*
- * Secure Channel Assistant — end-to-end encrypted messaging demo with a
+ * Secure Channel Assistant — end-to-end encrypted messaging with a
  * Double Ratchet (Signal-style) key exchange.
  * Copyright (C) 2026 MINING123STUDIOS
  *
@@ -133,6 +133,21 @@ async function streamingParseLargeFile(blob, windowSize, onProgress){
 
 /* ---------- binary large-payload export ---------- */
 
+/**
+ * Build the binary-export parts array from an already-encrypted packet.
+ * This is the non-streaming path used by the legacy base64-chunked export.
+ *
+ * Binary layout (each field is concatenated in order):
+ *   magic        4 bytes  – BIN_MAGIC_LARGE
+ *   headerLen    4 bytes  – big-endian uint32
+ *   header       variable – masked JSON header
+ *   iv          12 bytes  – raw AES-GCM IV
+ *   chunkCount   4 bytes  – big-endian uint32
+ *   chunks       variable – for each chunk: length (4 bytes BE) + raw cipher bytes
+ *
+ * @param {object} packet – encrypted packet with .header, .iv, .dataChunks[]
+ * @returns {Promise<Uint8Array[]>} ordered array of binary parts
+ */
 async function buildLargeExportPartsBinary(packet){
   const headerBytes = await maskBytes(new TextEncoder().encode(JSON.stringify(packet.header)));
   const ivBytes = unb64(packet.iv);
@@ -253,7 +268,6 @@ async function* streamingEncryptExport(session, file, extraHeader, onProgress){
     { dh: b64(myPubRawLocal), pn: session.PN, n: session.Ns },
     extraHeader || {}
   );
-  session.Ns++;
 
   const baseIv = crypto.getRandomValues(new Uint8Array(12));
   const aad = new TextEncoder().encode(JSON.stringify(header));
@@ -273,32 +287,42 @@ async function* streamingEncryptExport(session, file, extraHeader, onProgress){
 
   // --- stream: read → encrypt → yield cipher chunk ---
   let offset = 0;
-  for(let i = 0; i < chunkCount; i++){
-    const { mkSeed, nextCK } = await kdfCK(session.CKs);
-    session.CKs = nextCK;
-    const aesKey = await deriveMessageAesKey(mkSeed);
-    secureClear(mkSeed);
+  let ckCursor = session.CKs;
+  try{
+    for(let i = 0; i < chunkCount; i++){
+      const { mkSeed, nextCK } = await kdfCK(ckCursor);
+      ckCursor = nextCK;
+      const aesKey = await deriveMessageAesKey(mkSeed);
+      secureClear(mkSeed);
 
-    const end = Math.min(offset + GCM_CHUNK_BYTES, file.size);
-    const plainBuf = await file.slice(offset, end).arrayBuffer();
-    const chunk = new Uint8Array(plainBuf);
-    offset = end;
+      const end = Math.min(offset + GCM_CHUNK_BYTES, file.size);
+      const plainBuf = await file.slice(offset, end).arrayBuffer();
+      const chunk = new Uint8Array(plainBuf);
+      offset = end;
 
-    const chunkIv = chunkCount > 1 ? await deriveChunkIv(baseIv, i) : baseIv;
-    const cipher = await crypto.subtle.encrypt(
-      { name: "AES-GCM", iv: chunkIv, additionalData: aad },
-      aesKey, chunk
-    );
-    secureClear(chunk);
-    secureClear(aesKey);
+      const chunkIv = chunkCount > 1 ? await deriveChunkIv(baseIv, i) : baseIv;
+      const cipher = await crypto.subtle.encrypt(
+        { name: "AES-GCM", iv: chunkIv, additionalData: aad },
+        aesKey, chunk
+      );
+      secureClear(chunk);
+      secureClear(aesKey);
 
-    // Yield: chunk length (4 bytes) + raw cipher bytes
-    const lenBuf = new Uint8Array(4);
-    new DataView(lenBuf.buffer).setUint32(0, cipher.byteLength, false);
-    yield lenBuf;
-    yield new Uint8Array(cipher);
+      // Yield: chunk length (4 bytes) + raw cipher bytes
+      const lenBuf = new Uint8Array(4);
+      new DataView(lenBuf.buffer).setUint32(0, cipher.byteLength, false);
+      yield lenBuf;
+      yield new Uint8Array(cipher);
 
-    if(onProgress) onProgress((i + 1) / chunkCount);
-    await yieldToUI();
+      if(onProgress) onProgress((i + 1) / chunkCount);
+      await yieldToUI();
+    }
+    // Commit state only after all chunks succeed.
+    session.CKs = ckCursor;
+    session.Ns++;
+  } catch(e){
+    // On failure, state was never mutated — session remains consistent
+    // at the pre-streaming snapshot.  Rethrow for the consumer.
+    throw e;
   }
 }

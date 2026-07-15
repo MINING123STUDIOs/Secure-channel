@@ -1,5 +1,5 @@
 /*
- * Secure Channel Assistant — end-to-end encrypted messaging demo with a
+ * Secure Channel Assistant — end-to-end encrypted messaging with a
  * Double Ratchet (Signal-style) key exchange.
  * Copyright (C) 2026 MINING123STUDIOS
  *
@@ -511,6 +511,7 @@ async function togglePriv(){
   const el = document.getElementById("privKey");
   const icon = document.getElementById("eyeIcon");
   const label = document.getElementById("toggleLabel");
+  if(!myPrivKeyB64) return;
   if(el.type === "password"){
     if(!await confirmPrivateKeyExposure("reveal", document.getElementById("privKeyOut"))) return;
     el.value = myPrivKeyB64;
@@ -897,7 +898,7 @@ function exportMsgBox(){
     return;
   }
   const text = document.getElementById("msg").value;
-  if(!text){ document.getElementById("msg").value = MSG_NOTHING_TO_EXPORT; return; }
+  if(!text){ showInlineMessage(document.getElementById("cipherOut"), MSG_NOTHING_TO_EXPORT); return; }
   downloadBlob(new Blob([text], { type: 'text/plain' }), 'message.txt');
 }
 
