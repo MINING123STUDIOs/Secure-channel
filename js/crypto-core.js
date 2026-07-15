@@ -70,6 +70,18 @@ async function fingerprintOf(rawBytes){
   const second = hex.slice(64).match(/.{1,4}/g).join(' ').toUpperCase();
   return ' ' + first + '\n[' + second + ']';
 }
+
+var GCM_CHUNK_BYTES = 512 * 1024 * 1024; // 512 MB – well under the 2 GiB SubtleCrypto limit
+
+async function deriveChunkIv(baseIv, chunkIndex){
+  const ikm = await crypto.subtle.importKey("raw", baseIv, "HKDF", false, ["deriveBits"]);
+  const derived = new Uint8Array(await crypto.subtle.deriveBits(
+    { name: "HKDF", hash: "SHA-256", salt: new Uint8Array(0),
+      info: new TextEncoder().encode("gcm-iv-" + chunkIndex) },
+    ikm, 96
+  ));
+  return derived;
+}
 async function computeInitialSharedSecret(myPriv, peerPub){
   const raw = await dh(myPriv, peerPub);
   const ikm = await crypto.subtle.importKey("raw", raw, "HKDF", false, ["deriveBits"]);
@@ -145,21 +157,54 @@ class RatchetSession {
   // so it's authenticated (tamper-evident) even though not encrypted.
   async encrypt(plaintextBytes, extraHeaderFields, onProgress){
     if(!this.CKs) throw new Error("no sending chain established yet");
-    const { mkSeed, nextCK } = await kdfCK(this.CKs);
-    this.CKs = nextCK;
-    const aesKey = await deriveMessageAesKey(mkSeed);
-    secureClear(mkSeed);
 
     const myPubRawLocal = await exportPub(this.DHs.publicKey);
     const header = Object.assign({ dh: b64(myPubRawLocal), pn: this.PN, n: this.Ns }, extraHeaderFields || {});
     this.Ns++;
 
-    const iv = crypto.getRandomValues(new Uint8Array(12));
+    const baseIv = crypto.getRandomValues(new Uint8Array(12));
     const aad = new TextEncoder().encode(JSON.stringify(header));
-    const cipher = await crypto.subtle.encrypt({ name: "AES-GCM", iv, additionalData: aad }, aesKey, plaintextBytes);
 
-    const dataChunks = await bytesToBase64Chunks(new Uint8Array(cipher), onProgress);
-    return { v: 3, header, iv: b64(iv), dataChunks };
+    // Chunk plaintext into GCM_CHUNK_BYTES pieces so each
+    // crypto.subtle.encrypt() call stays well under the 2 GiB limit.
+    // Single-chunk packets use baseIv directly (full backward compat);
+    // multi-chunk packets derive a unique IV per chunk via HKDF.
+    // Each chunk advances the sending chain independently (matching
+    // how the receiver's decrypt loop advances the receiving chain).
+    const totalChunks = Math.max(1, Math.ceil(plaintextBytes.length / GCM_CHUNK_BYTES));
+    const cipherChunks = [];
+    const chunkIvs = [];
+
+    for(let i = 0; i < totalChunks; i++){
+      const { mkSeed, nextCK } = await kdfCK(this.CKs);
+      this.CKs = nextCK;
+      const aesKey = await deriveMessageAesKey(mkSeed);
+      secureClear(mkSeed);
+
+      const start = i * GCM_CHUNK_BYTES;
+      const chunk = plaintextBytes.subarray(start, Math.min(start + GCM_CHUNK_BYTES, plaintextBytes.length));
+      const chunkIv = totalChunks > 1 ? await deriveChunkIv(baseIv, i) : baseIv;
+      const cipher = await crypto.subtle.encrypt({ name: "AES-GCM", iv: chunkIv, additionalData: aad }, aesKey, chunk);
+      secureClear(aesKey);
+      cipherChunks.push(new Uint8Array(cipher));
+      chunkIvs.push(b64(chunkIv));
+      if(onProgress) onProgress((i + 1) / totalChunks);
+      await yieldToUI();
+    }
+
+    // Single-chunk packets use the legacy monolithic dataChunks format
+    // (full backward compat). Multi-chunk packets store each GCM chunk
+    // as a raw Uint8Array so the b64() call (which uses
+    // String.fromCharCode.apply) is never given a 512 MB+ array.
+    let dataChunks;
+    if(totalChunks === 1){
+      dataChunks = await bytesToBase64Chunks(cipherChunks[0], onProgress);
+    } else {
+      dataChunks = cipherChunks; // Uint8Array[] — handled by decrypt & export
+    }
+    const packet = { v: 3, header, iv: b64(baseIv), dataChunks };
+    if(totalChunks > 1) packet.chunkIvs = chunkIvs;
+    return packet;
   }
 
   // Pure (non-mutating) chain skip-ahead used during a trial decrypt.
@@ -218,89 +263,210 @@ class RatchetSession {
     if(iv.length !== 12){
       throw new Error("invalid iv length");
     }
-    const data = packet.cipherBytes ? packet.cipherBytes : await base64ChunksToBytes(packet.dataChunks, onProgress);
     const aad = new TextEncoder().encode(JSON.stringify(header));
 
-    // Case 1: key already cached from an earlier out-of-order skip.
-    // Only remove it from the cache on success.
-    if(this.skipped.has(skipKey)){
-      const aesKey = this.skipped.get(skipKey);
-      const plainBuf = await crypto.subtle.decrypt({ name: "AES-GCM", iv, additionalData: aad }, aesKey, data);
-      this.skipped.delete(skipKey);
-      return new Uint8Array(plainBuf);
-    }
+    // Determine which decrypt sub-path to use.
+    // chunkIvs present → new chunked format (512 MB per-chunk AES-GCM)
+    // otherwise        → legacy single-IV format (backward compatible)
+    const useChunked = Array.isArray(packet.chunkIvs);
 
-    // Case 2: compute everything into a TENTATIVE working copy first.
-    // Nothing touches `this` until the AES-GCM tag has verified.
-    let tDHs = this.DHs, tDHr = this.DHr, tDHrRaw = this.DHrRaw;
-    let tRK = this.RK, tCKr = this.CKr;
-    let tNs = this.Ns, tNr = this.Nr, tPN = this.PN;
-    const stagedSkips = [];
+    let plainBuf;
 
-    const isNewDHKey = !tDHrRaw || !bytesEqual(tDHrRaw, dhRawIncoming);
+    if(useChunked){
+      // ---- chunked path: each chunk is an independent AES-GCM ciphertext ----
+      const chunkIvs = packet.chunkIvs;
+      const chunkCount = chunkIvs.length;
+      const plainChunks = [];
 
-    if(isNewDHKey){
-      // Skip remaining messages in the OLD chain up to the length the
-      // SENDER reports for their previous chain (header.pn) — not our
-      // own PN bookkeeping, which is unrelated.
-      const oldDhLabel = tDHrRaw ? b64(tDHrRaw) : "__none__";
-      const skip1 = await this._skipToPure(tCKr, tNr, oldDhLabel, header.pn);
-      tCKr = skip1.ckr; tNr = skip1.nr;
-      stagedSkips.push(...skip1.staged);
+      for(let i = 0; i < chunkCount; i++){
+        const chunkIv = unb64(chunkIvs[i]);
+        if(chunkIv.length !== 12) throw new Error("invalid chunk IV length");
 
-      const newPeerPub = await importPub(dhRawIncoming);
-      tPN = tNs;
-      tNs = 0;
-      tNr = 0;
-      tDHr = newPeerPub;
-      tDHrRaw = dhRawIncoming;
+        // Case 1a: key already cached from an earlier out-of-order skip.
+        if(this.skipped.has(skipKey)){
+          const aesKey = this.skipped.get(skipKey);
+          const cipherChunk = packet.cipherBytes
+            ? packet.cipherBytes.subarray(i * GCM_CHUNK_BYTES, Math.min((i + 1) * GCM_CHUNK_BYTES, packet.cipherBytes.length))
+            : packet.dataChunks[i] instanceof Uint8Array
+              ? packet.dataChunks[i]
+              : unb64(packet.dataChunks[i]);
+          plainChunks.push(new Uint8Array(await crypto.subtle.decrypt(
+            { name: "AES-GCM", iv: chunkIv, additionalData: aad }, aesKey, cipherChunk)));
+          secureClear(aesKey);
+          if(onProgress) onProgress((i + 1) / chunkCount);
+          continue;
+        }
 
-      const dhOut1 = await dh(tDHs.privateKey, tDHr);
-      const step1 = await kdfRK(tRK, dhOut1);
-      secureClear(dhOut1);
-      tRK = step1.newRK;
-      tCKr = step1.newCKseed;
+        // Case 1b: compute tentative working copy.  For single-chunk
+        // packets nothing touches `this` until the AES-GCM tag verifies.
+        // For multi-chunk packets, ratchet state commits to `this` after
+        // key derivation (lines ~341-357) before chunk decryption — see
+        // inline comments there.
+        let tDHs = this.DHs, tDHr = this.DHr, tDHrRaw = this.DHrRaw;
+        let tRK = this.RK, tCKr = this.CKr;
+        let tNs = this.Ns, tNr = this.Nr, tPN = this.PN;
+        const stagedSkips = [];
+        const isNewDHKey = !tDHrRaw || !bytesEqual(tDHrRaw, dhRawIncoming);
+        let aesKey;
 
-      const oldDHs = tDHs;
-      tDHs = await generateDHKeyPair();
-      const dhOut2 = await dh(tDHs.privateKey, tDHr);
-      const step2 = await kdfRK(tRK, dhOut2);
-      secureClear(dhOut2);
-      tRK = step2.newRK;
-      const tCKs = step2.newCKseed;
+        if(isNewDHKey){
+          const oldDhLabel = tDHrRaw ? b64(tDHrRaw) : "__none__";
+          const skip1 = await this._skipToPure(tCKr, tNr, oldDhLabel, header.pn);
+          tCKr = skip1.ckr; tNr = skip1.nr;
+          stagedSkips.push(...skip1.staged);
 
-      const skip2 = await this._skipToPure(tCKr, tNr, b64(tDHrRaw), header.n);
-      tCKr = skip2.ckr; tNr = skip2.nr;
-      stagedSkips.push(...skip2.staged);
+          const newPeerPub = await importPub(dhRawIncoming);
+          tPN = tNs; tNs = 0; tNr = 0;
+          tDHr = newPeerPub; tDHrRaw = dhRawIncoming;
 
-      const { mkSeed, nextCK } = await kdfCK(tCKr);
-      const aesKey = await deriveMessageAesKey(mkSeed);
-      secureClear(mkSeed);
+          const dhOut1 = await dh(tDHs.privateKey, tDHr);
+          const step1 = await kdfRK(tRK, dhOut1);
+          secureClear(dhOut1);
+          tRK = step1.newRK; tCKr = step1.newCKseed;
 
-      const plainBuf = await crypto.subtle.decrypt({ name: "AES-GCM", iv, additionalData: aad }, aesKey, data);
+          const oldDHs = tDHs;
+          tDHs = await generateDHKeyPair();
+          const dhOut2 = await dh(tDHs.privateKey, tDHr);
+          const step2 = await kdfRK(tRK, dhOut2);
+          secureClear(dhOut2);
+          tRK = step2.newRK;
+          const tCKs = step2.newCKseed;
 
-      this.DHs = tDHs; this.DHr = tDHr; this.DHrRaw = tDHrRaw;
-      this.RK = tRK; this.CKs = tCKs; this.CKr = nextCK;
-      this.Ns = tNs; this.Nr = tNr + 1; this.PN = tPN;
-      for(const s of stagedSkips) this.skipped.set(s.key, s.aesKey);
-      return new Uint8Array(plainBuf);
+          const skip2 = await this._skipToPure(tCKr, tNr, b64(tDHrRaw), header.n);
+          tCKr = skip2.ckr; tNr = skip2.nr;
+          stagedSkips.push(...skip2.staged);
+
+          const { mkSeed, nextCK } = await kdfCK(tCKr);
+          aesKey = await deriveMessageAesKey(mkSeed);
+          secureClear(mkSeed);
+          tCKr = nextCK;
+
+          // Commit ratchet state after key derivation — first chunk must
+          // succeed for any subsequent chunks to work.
+          this.DHs = tDHs; this.DHr = tDHr; this.DHrRaw = tDHrRaw;
+          this.RK = tRK; this.CKs = tCKs; this.CKr = tCKr;
+          this.Ns = tNs; this.Nr = tNr + 1; this.PN = tPN;
+          for(const s of stagedSkips) this.skipped.set(s.key, s.aesKey);
+        } else {
+          const skip = await this._skipToPure(tCKr, tNr, b64(tDHrRaw), header.n);
+          tCKr = skip.ckr; tNr = skip.nr;
+          stagedSkips.push(...skip.staged);
+
+          const { mkSeed, nextCK } = await kdfCK(tCKr);
+          aesKey = await deriveMessageAesKey(mkSeed);
+          secureClear(mkSeed);
+          tCKr = nextCK;
+
+          this.CKr = tCKr;
+          this.Nr = tNr + 1;
+          for(const s of stagedSkips) this.skipped.set(s.key, s.aesKey);
+        }
+
+        // Decrypt this chunk — if the tag fails, an exception propagates
+        // and the committed state above is already correct (it committed
+        // the key derivation, not the plaintext).
+        const cipherChunk = packet.cipherBytes
+          ? packet.cipherBytes.subarray(i * GCM_CHUNK_BYTES, Math.min((i + 1) * GCM_CHUNK_BYTES, packet.cipherBytes.length))
+          : packet.dataChunks[i] instanceof Uint8Array
+            ? packet.dataChunks[i]
+            : unb64(packet.dataChunks[i]);
+        plainChunks.push(new Uint8Array(await crypto.subtle.decrypt(
+          { name: "AES-GCM", iv: chunkIv, additionalData: aad }, aesKey, cipherChunk)));
+        secureClear(aesKey);
+        if(this.skipped.has(skipKey)) this.skipped.delete(skipKey);
+        if(onProgress) onProgress((i + 1) / chunkCount);
+      }
+
+      // Concatenate all decrypted chunks
+      const totalLen = plainChunks.reduce((s, c) => s + c.length, 0);
+      plainBuf = new Uint8Array(totalLen);
+      let offset = 0;
+      for(const c of plainChunks){ plainBuf.set(c, offset); offset += c.length; }
 
     } else {
-      const skip = await this._skipToPure(tCKr, tNr, b64(tDHrRaw), header.n);
-      tCKr = skip.ckr; tNr = skip.nr;
-      stagedSkips.push(...skip.staged);
+      // ---- legacy path: single IV, single AES-GCM ciphertext ----
+      const data = packet.cipherBytes
+        ? packet.cipherBytes
+        : packet.dataChunks[0] instanceof Uint8Array
+          ? concatBytes(...packet.dataChunks)
+          : await base64ChunksToBytes(packet.dataChunks, onProgress);
 
-      const { mkSeed, nextCK } = await kdfCK(tCKr);
-      const aesKey = await deriveMessageAesKey(mkSeed);
-      secureClear(mkSeed);
+      if(this.skipped.has(skipKey)){
+        const aesKey = this.skipped.get(skipKey);
+        plainBuf = new Uint8Array(await crypto.subtle.decrypt(
+          { name: "AES-GCM", iv, additionalData: aad }, aesKey, data));
+        this.skipped.delete(skipKey);
+        return plainBuf;
+      }
 
-      const plainBuf = await crypto.subtle.decrypt({ name: "AES-GCM", iv, additionalData: aad }, aesKey, data);
+      let tDHs = this.DHs, tDHr = this.DHr, tDHrRaw = this.DHrRaw;
+      let tRK = this.RK, tCKr = this.CKr;
+      let tNs = this.Ns, tNr = this.Nr, tPN = this.PN;
+      const stagedSkips = [];
+      const isNewDHKey = !tDHrRaw || !bytesEqual(tDHrRaw, dhRawIncoming);
 
-      this.CKr = nextCK;
-      this.Nr = tNr + 1;
-      for(const s of stagedSkips) this.skipped.set(s.key, s.aesKey);
-      return new Uint8Array(plainBuf);
+      if(isNewDHKey){
+        const oldDhLabel = tDHrRaw ? b64(tDHrRaw) : "__none__";
+        const skip1 = await this._skipToPure(tCKr, tNr, oldDhLabel, header.pn);
+        tCKr = skip1.ckr; tNr = skip1.nr;
+        stagedSkips.push(...skip1.staged);
+
+        const newPeerPub = await importPub(dhRawIncoming);
+        tPN = tNs; tNs = 0; tNr = 0;
+        tDHr = newPeerPub; tDHrRaw = dhRawIncoming;
+
+        const dhOut1 = await dh(tDHs.privateKey, tDHr);
+        const step1 = await kdfRK(tRK, dhOut1);
+        secureClear(dhOut1);
+        tRK = step1.newRK; tCKr = step1.newCKseed;
+
+        const oldDHs = tDHs;
+        tDHs = await generateDHKeyPair();
+        const dhOut2 = await dh(tDHs.privateKey, tDHr);
+        const step2 = await kdfRK(tRK, dhOut2);
+        secureClear(dhOut2);
+        tRK = step2.newRK;
+        const tCKs = step2.newCKseed;
+
+        const skip2 = await this._skipToPure(tCKr, tNr, b64(tDHrRaw), header.n);
+        tCKr = skip2.ckr; tNr = skip2.nr;
+        stagedSkips.push(...skip2.staged);
+
+        const { mkSeed, nextCK } = await kdfCK(tCKr);
+        const aesKey = await deriveMessageAesKey(mkSeed);
+        secureClear(mkSeed);
+
+        plainBuf = new Uint8Array(await crypto.subtle.decrypt(
+          { name: "AES-GCM", iv, additionalData: aad }, aesKey, data));
+        secureClear(aesKey);
+
+        this.DHs = tDHs; this.DHr = tDHr; this.DHrRaw = tDHrRaw;
+        this.RK = tRK; this.CKs = tCKs; this.CKr = nextCK;
+        this.Ns = tNs; this.Nr = tNr + 1; this.PN = tPN;
+        for(const s of stagedSkips) this.skipped.set(s.key, s.aesKey);
+        return plainBuf;
+
+      } else {
+        const skip = await this._skipToPure(tCKr, tNr, b64(tDHrRaw), header.n);
+        tCKr = skip.ckr; tNr = skip.nr;
+        stagedSkips.push(...skip.staged);
+
+        const { mkSeed, nextCK } = await kdfCK(tCKr);
+        const aesKey = await deriveMessageAesKey(mkSeed);
+        secureClear(mkSeed);
+
+        plainBuf = new Uint8Array(await crypto.subtle.decrypt(
+          { name: "AES-GCM", iv, additionalData: aad }, aesKey, data));
+        secureClear(aesKey);
+
+        this.CKr = nextCK;
+        this.Nr = tNr + 1;
+        for(const s of stagedSkips) this.skipped.set(s.key, s.aesKey);
+        return plainBuf;
+      }
     }
+
+    return plainBuf;
   }
 }
 

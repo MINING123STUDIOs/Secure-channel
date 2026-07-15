@@ -33,11 +33,14 @@
      (a separate HMAC would be redundant). The message header is
      bound in as associated data, so tampering with the header alone
      (even without touching the ciphertext) is also detected.
-   - decrypt() is transactional: it never mutates any session state
-     until the AES-GCM tag has actually verified. This matters more
-     than it sounds — without it, a single corrupted or tampered
-     packet can permanently desynchronize the ratchet and brick the
-     whole conversation. (This was caught and fixed during testing.)
+   - decrypt() is transactional for single-chunk packets: it never mutates
+     any session state until the AES-GCM tag has actually verified. For
+     multi-chunk packets, ratchet state commits after key derivation but
+     before chunk decryption (first chunk must succeed for subsequent
+     chunks to work). This matters more than it sounds — without the
+     single-chunk guarantee, a single corrupted or tampered packet can
+     permanently desynchronize the ratchet and brick the whole
+     conversation. (This was caught and fixed during testing.)
 
    LARGE PAYLOADS (>~100MB), why this needs special handling:
    - Chrome/Edge/Node's JS engine (V8) throws a hard RangeError once a
@@ -65,6 +68,7 @@
    FILE MAP (script split across js/, in load order):
    - constants.js    — this file: thresholds, byte helpers, the outer
                         envelope obfuscation layer.
+   - msg.js          — all user-facing strings as named constants.
    - crypto-core.js  — ECDH/HKDF/HMAC/AES-GCM primitives and the
                         RatchetSession double-ratchet implementation.
    - large-payload.js— base64 chunking and the streaming large-file
@@ -95,6 +99,11 @@ const SPINNER_THRESHOLD = 512 * 1024;              // above this, show the progr
 const LARGE_IMPORT_CONFIRM_THRESHOLD = 300 * 1024 * 1024; // above this, ask for confirmation before importing (may crash browser)
 const PRIVKEY_CONFIRM_TIMEOUT = 10_000;             // private-key exposure warnings auto-dismiss (cancel) after this many ms
 const PRIVKEY_AUTOHIDE_TIMEOUT = 15_000;            // revealed private key auto-hides after this many ms
+const FILE_READ_CHUNK = 128 * 1024 * 1024;           // 128 MB — avoids browser 2 GiB arrayBuffer truncation
+const STREAMING_ENCRYPT_THRESHOLD = 256 * 1024 * 1024; // above this, encrypt streams directly from file (avoids holding full plaintext in memory)
+
+// Set to true in the console (DEBUG = true) to enable detailed error logging.
+var DEBUG = false;
 
 // Binary format magic bytes — 4-byte signatures written at the start of
 // exported files so import can distinguish binary from base64 text.
@@ -238,7 +247,7 @@ async function fillPseudorandomStream(seed32, length){
     let t = Math.imul(a ^ (a >>> 15), 1 | a);
     t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
     words[i] = (t ^ (t >>> 14)) >>> 0;
-    if((i & 0xffffff) === 0) await yieldToUI(); // roughly every 64MB (matches CHUNK_BYTES elsewhere)
+    if((i & 0xffffff) === 0) await yieldToUI(); // roughly every 64MB
   }
   const rem = length - wordCount * 4;
   if(rem > 0){
@@ -447,6 +456,9 @@ async function decodeIdentityBytes(bytes){
 
 /* ---------- secure memory clearing ---------- */
 
+// Best-effort zeroing. Works on Uint8Array and ArrayBuffer.
+// CryptoKey objects are opaque — no JS API can zero their internal material.
+// They are cleared by the engine when garbage collected (timing non-deterministic).
 function secureClear(buf){
   if(buf instanceof Uint8Array) buf.fill(0);
   else if(buf instanceof ArrayBuffer) new Uint8Array(buf).fill(0);

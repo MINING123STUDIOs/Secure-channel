@@ -193,8 +193,8 @@ async function pasteInputField(id) {
       updatePeerFingerprint();
     }
   } catch(e) {
-    console.error('Paste failed:', e.message);
-    showInlineMessage(document.getElementById("cipherOut"), MSG_CLIPBOARD_FAILED);
+    if(DEBUG) console.error('Paste failed:', e.message);
+    showInlineMessage(document.getElementById(id), MSG_CLIPBOARD_FAILED);
   }
 }
 
@@ -262,8 +262,7 @@ function showInlineMessage(outEl, message, ms){
 }
 
 function estimateChunksByteLength(chunks){
-  // rough (slightly over-) estimate of decoded byte size from base64 chunk lengths, for display purposes only
-  return chunks.reduce((s, c) => s + Math.floor(c.length * 0.75), 0);
+  return chunks.reduce((s, c) => s + (c instanceof Uint8Array ? c.length : Math.floor(c.length * 0.75)), 0);
 }
 
 /* ---------- UI: generic copy / export / import for text boxes ----------
@@ -280,7 +279,8 @@ async function copyBox(id){
       showInlineMessage(document.getElementById("cipherOut"), MSG_TOO_LARGE_TO_COPY);
       return;
     }
-    navigator.clipboard.writeText(lastEncryptedPacketB64);
+    try { await navigator.clipboard.writeText(lastEncryptedPacketB64); }
+    catch(e){ showInlineMessage(document.getElementById("cipherOut"), MSG_CLIPBOARD_WRITE_FAILED); }
     return;
   }
   if(id === 'plainOut'){
@@ -293,17 +293,20 @@ async function copyBox(id){
       showInlineMessage(document.getElementById("plainOut"), MSG_TOO_LARGE_TO_COPY);
       return;
     }
-    navigator.clipboard.writeText(new TextDecoder().decode(lastDecrypted.bytes));
+    try { await navigator.clipboard.writeText(new TextDecoder().decode(lastDecrypted.bytes)); }
+    catch(e){ showInlineMessage(document.getElementById("plainOut"), MSG_CLIPBOARD_WRITE_FAILED); }
     return;
   }
   if(id === 'privKey'){
     if(!await confirmPrivateKeyExposure("copy", document.getElementById("privKeyOut"))) return;
-    navigator.clipboard.writeText(myPrivKeyB64);
+    try { await navigator.clipboard.writeText(myPrivKeyB64); }
+    catch(e){ showInlineMessage(document.getElementById("privKeyOut"), MSG_CLIPBOARD_WRITE_FAILED); }
     return;
   }
   const el = document.getElementById(id);
   const text = el.value !== undefined ? el.value : el.textContent;
-  navigator.clipboard.writeText(text);
+  try { await navigator.clipboard.writeText(text); }
+  catch(e){ showInlineMessage(el, MSG_CLIPBOARD_WRITE_FAILED); }
 }
 
 async function exportTextBox(id, filename, isSensitive){
@@ -367,7 +370,7 @@ async function importIntoTextareaProcess(id, file){
           }
         }
       } catch(e){
-        console.error('File import failed:', e.message);
+        if(DEBUG) console.error('File import failed:', e.message);
         document.getElementById('cipherIn').value = MSG_CANT_READ_CIPHER_FILE(file.name);
         return;
       } finally {
@@ -410,12 +413,22 @@ function resetTransientState(){
   pendingDecryptPacket = null;
   if(lastDecrypted && lastDecrypted.bytes) secureClear(lastDecrypted.bytes);
   lastDecrypted = null;
+  document.getElementById("pubKey").value = "";
   document.getElementById("cipherOut").textContent = "";
   document.getElementById("plainOut").textContent = "";
-  document.getElementById("sessionFingerprintField").style.display = "none";
+  document.getElementById("sessionFingerprintField").classList.add("hidden");
 }
 
 async function generateKeys(){
+  if(kp){
+    if(!await showConfirmWarning(
+      document.getElementById("privKeyOut"),
+      CONFIRM_KEY_REPLACEMENT,
+      BTN_GENERATE_NEW_KEYS,
+      BTN_CANCEL
+    )) return;
+  }
+
   kp = await generateIdentityKeyPair();
   myPubRaw = await exportPub(kp.publicKey);
   const privRaw = new Uint8Array(await crypto.subtle.exportKey("pkcs8", kp.privateKey));
@@ -468,6 +481,10 @@ async function importIdentity(){
     const pubBytes = unb64(obj.publicKey);
     const privateKey = await crypto.subtle.importKey("pkcs8", privBytes, { name: "ECDH", namedCurve: "P-256" }, true, ["deriveBits"]);
     const publicKey = await crypto.subtle.importKey("spki", pubBytes, { name: "ECDH", namedCurve: "P-256" }, true, []);
+
+    const derivedPub = await exportPub(privateKey);
+    if(!bytesEqual(derivedPub, pubBytes)) throw new Error("key pair mismatch");
+    secureClear(derivedPub);
     secureClear(privBytes);
 
     kp = { privateKey, publicKey };
@@ -481,7 +498,7 @@ async function importIdentity(){
 
     setStatus(STATUS_IDENTITY_RESTORED);
   } catch(e){
-    console.error('Identity import failed:', e.message);
+    if(DEBUG) console.error('Identity import failed:', e.message);
     showInlineMessage(document.getElementById("cipherOut"), MSG_INVALID_IDENTITY_FILE);
   }
 }
@@ -618,12 +635,12 @@ async function derive(){
 
     const sessFp = await sessionFingerprintOf(myPubRaw, peerPubRaw);
     document.getElementById("sessionFingerprint").textContent = sessFp;
-    document.getElementById("sessionFingerprintField").style.display = "";
+    document.getElementById("sessionFingerprintField").classList.remove("hidden");
     await updatePeerFingerprint();
 
     setStatus(STATUS_SESSION_ESTABLISHED(!!session.CKs));
   } catch(e){
-    console.error("DERIVE ERROR:", e.message);
+    if(DEBUG) console.error("DERIVE ERROR:", e.message);
     setStatus(STATUS_SESSION_FAILED);
   }
 }
@@ -663,13 +680,83 @@ async function doEncrypt(){
     ? pendingAttachment.size > SPINNER_THRESHOLD
     : document.getElementById("msg").value.length > SPINNER_THRESHOLD;
 
+  // --- streaming path: large file attachments ---
+  if(pendingAttachment && pendingAttachment.size > STREAMING_ENCRYPT_THRESHOLD){
+    const file = pendingAttachment.file;
+    const filename = pendingAttachment.name.replace(/\.[^.]+$/, '') + '.scb';
+    const canStreamToDisk = typeof showSaveFilePicker === 'function';
+    const confirmMsg = canStreamToDisk
+      ? CONFIRM_LARGE_ENCRYPT(formatBytes(file.size))
+      : CONFIRM_LARGE_ENCRYPT(formatBytes(file.size)) + "\n\n" + MSG_STREAMING_UNAVAILABLE;
+    if(!await showConfirmWarning(outEl, confirmMsg, BTN_CONTINUE, BTN_CANCEL)) return;
+
+    try {
+      Progress.show(PROGRESS_ENCRYPTING);
+      const header = { file: { name: pendingAttachment.name, type: pendingAttachment.type } };
+
+      if(canStreamToDisk){
+        // Chrome/Edge: write directly to disk — zero extra memory.
+        const handle = await showSaveFilePicker({ suggestedName: filename });
+        const writable = await handle.createWritable();
+        let size = 0;
+        for await(const part of streamingEncryptExport(session, file, header, (f) => Progress.update(f, PROGRESS_ENCRYPTING))){
+          await writable.write(part);
+          size += part.byteLength;
+        }
+        await writable.close();
+        lastEncryptedPacket = null;
+        lastEncryptedPacketB64 = null;
+        outEl.textContent = MSG_ENCRYPTED_LARGE(formatBytes(size));
+      } else {
+        // Firefox/Safari: stream into a Blob via Response, still buffers in memory
+        // but avoids accumulating a parts[] array.
+        let size = 0;
+        const src = streamingEncryptExport(session, file, header, (f) => Progress.update(f, PROGRESS_ENCRYPTING));
+        const stream = new ReadableStream({
+          async start(ctrl){
+            try {
+              for await(const part of src){
+                size += part.byteLength;
+                ctrl.enqueue(part);
+              }
+              ctrl.close();
+            } catch(e){ ctrl.error(e); }
+          }
+        });
+        const blob = await new Response(stream).blob();
+        lastEncryptedPacket = null;
+        lastEncryptedPacketB64 = null;
+        outEl.textContent = MSG_ENCRYPTED_LARGE(formatBytes(size));
+        downloadBlob(blob, filename);
+      }
+    } catch(e){
+      if(DEBUG) console.error('Streaming encryption failed:', e.message);
+      outEl.textContent = MSG_ENCRYPT_FAILED;
+    } finally {
+      Progress.hide();
+    }
+    return;
+  }
+
+  // --- standard path: text messages and small file attachments ---
   if(willBeLarge) Progress.show(PROGRESS_READING);
 
   if(pendingAttachment){
     try {
-      plaintextBytes = new Uint8Array(await pendingAttachment.file.arrayBuffer());
+      const file = pendingAttachment.file;
+      const totalChunks = Math.ceil(file.size / FILE_READ_CHUNK);
+      plaintextBytes = new Uint8Array(file.size);
+      let offset = 0;
+      for(let i = 0; i < totalChunks; i++){
+        const end = Math.min(offset + FILE_READ_CHUNK, file.size);
+        const chunkBuf = await file.slice(offset, end).arrayBuffer();
+        plaintextBytes.set(new Uint8Array(chunkBuf), offset);
+        offset = end;
+        if(willBeLarge) Progress.update(i / totalChunks, PROGRESS_READING);
+        await yieldToUI();
+      }
     } catch(e){
-      console.error('File read failed:', e.message);
+      if(DEBUG) console.error('File read failed:', e.message);
       outEl.textContent = MSG_CANT_READ_FILE;
       if(willBeLarge) Progress.hide();
       return;
@@ -692,7 +779,11 @@ async function doEncrypt(){
       willBeLarge ? (f) => Progress.update(f, PROGRESS_ENCRYPTING) : null
     );
     lastEncryptedPacket = packet;
-    lastEncryptedPacketB64 = await encodeOpaquePacket(packet);
+    // Multi-chunk packets store Uint8Array cipher chunks which can't be
+    // JSON-serialized; they're accessed via binary export only.
+    lastEncryptedPacketB64 = Array.isArray(packet.chunkIvs)
+      ? null
+      : await encodeOpaquePacket(packet);
 
     if(plaintextBytes.length > DISPLAY_THRESHOLD){
       const approxCipherSize = estimateChunksByteLength(packet.dataChunks);
@@ -701,7 +792,7 @@ async function doEncrypt(){
       outEl.textContent = lastEncryptedPacketB64;
     }
   } catch(e){
-    console.error('Encryption failed:', e.message);
+    if(DEBUG) console.error('Encryption failed:', e.message);
     if(e.message && e.message.includes("no sending chain")){
       outEl.textContent = MSG_CANT_SEND_YET;
     } else {
@@ -733,10 +824,10 @@ async function doDecryptProcess(packet){
     } else if(plainBytes.length > DISPLAY_THRESHOLD){
       outEl.textContent = MSG_DECRYPTED_LARGE(formatBytes(plainBytes.length));
     } else {
-      outEl.textContent = "🔓 " + new TextDecoder().decode(plainBytes);
+      outEl.textContent = MSG_DECRYPTED_PREFIX + new TextDecoder().decode(plainBytes);
     }
   } catch(e){
-    console.error("DECRYPT ERROR:", e.message);
+    if(DEBUG) console.error("DECRYPT ERROR:", e.message);
     lastDecrypted = null;
     let msg = MSG_DECRYPT_FAILED;
     if(e.message && e.message.includes("unrecognized packet")){

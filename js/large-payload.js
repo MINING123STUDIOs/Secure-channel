@@ -128,12 +128,7 @@ async function streamingParseLargeFile(blob, windowSize, onProgress){
     await yieldToUI();
   }
 
-  const total = chunkBytesList.reduce((s, c) => s + c.length, 0);
-  const cipherBytes = new Uint8Array(total);
-  let off = 0;
-  for(const c of chunkBytesList){ cipherBytes.set(c, off); off += c.length; }
-
-  return { v: 3, header: headerObj, iv: ivStr, cipherBytes };
+  return { v: 3, header: headerObj, iv: ivStr, dataChunks: chunkBytesList };
 }
 
 /* ---------- binary large-payload export ---------- */
@@ -143,7 +138,7 @@ async function buildLargeExportPartsBinary(packet){
   const ivBytes = unb64(packet.iv);
   const chunkCount = packet.dataChunks.length;
 
-  // Pre-compute raw cipher bytes for each chunk (avoid holding all in memory at once)
+  // Build binary export parts array (all chunks held in memory until Blob is created)
   const parts = [];
   parts.push(new Uint8Array(BIN_MAGIC_LARGE));
 
@@ -163,7 +158,7 @@ async function buildLargeExportPartsBinary(packet){
 
   // each chunk: length (4 bytes) + raw bytes
   for(const c of packet.dataChunks){
-    const raw = unb64(c);
+    const raw = c instanceof Uint8Array ? c : unb64(c);
     const lenBuf = new Uint8Array(4);
     new DataView(lenBuf.buffer).setUint32(0, raw.length, false);
     parts.push(lenBuf);
@@ -240,10 +235,70 @@ async function streamingParseLargeBinaryFile(blob, windowSize, onProgress){
     await yieldToUI();
   }
 
-  const total = chunkBytesList.reduce((s, c) => s + c.length, 0);
-  const cipherBytes = new Uint8Array(total);
-  let off = 0;
-  for(const c of chunkBytesList){ cipherBytes.set(c, off); off += c.length; }
+  return { v: 3, header: headerObj, iv: ivStr, dataChunks: chunkBytesList };
+}
 
-  return { v: 3, header: headerObj, iv: ivStr, cipherBytes };
+/* ---------- streaming encrypt + export ----------
+   Reads a File via File.slice(), encrypts each chunk immediately, and yields
+   binary export parts incrementally.  Neither the full plaintext nor the full
+   ciphertext is ever held in memory — peak RAM stays near GCM_CHUNK_BYTES + one
+   cipher chunk (~512 MB + ~512 MB overhead, ~1 GB total). */
+
+async function* streamingEncryptExport(session, file, extraHeader, onProgress){
+  const chunkCount = Math.max(1, Math.ceil(file.size / GCM_CHUNK_BYTES));
+
+  // --- header (compute once, reuse for every yielded part) ---
+  const myPubRawLocal = await exportPub(session.DHs.publicKey);
+  const header = Object.assign(
+    { dh: b64(myPubRawLocal), pn: session.PN, n: session.Ns },
+    extraHeader || {}
+  );
+  session.Ns++;
+
+  const baseIv = crypto.getRandomValues(new Uint8Array(12));
+  const aad = new TextEncoder().encode(JSON.stringify(header));
+  const maskedHeader = await maskBytes(new TextEncoder().encode(JSON.stringify(header)));
+  const ivBytes = unb64(b64(baseIv));
+
+  // Yield: magic + header length + masked header + IV + chunk count
+  yield new Uint8Array(BIN_MAGIC_LARGE);
+  const headerLenBuf = new Uint8Array(4);
+  new DataView(headerLenBuf.buffer).setUint32(0, maskedHeader.length, false);
+  yield headerLenBuf;
+  yield maskedHeader;
+  yield ivBytes;
+  const countBuf = new Uint8Array(4);
+  new DataView(countBuf.buffer).setUint32(0, chunkCount, false);
+  yield countBuf;
+
+  // --- stream: read → encrypt → yield cipher chunk ---
+  let offset = 0;
+  for(let i = 0; i < chunkCount; i++){
+    const { mkSeed, nextCK } = await kdfCK(session.CKs);
+    session.CKs = nextCK;
+    const aesKey = await deriveMessageAesKey(mkSeed);
+    secureClear(mkSeed);
+
+    const end = Math.min(offset + GCM_CHUNK_BYTES, file.size);
+    const plainBuf = await file.slice(offset, end).arrayBuffer();
+    const chunk = new Uint8Array(plainBuf);
+    offset = end;
+
+    const chunkIv = chunkCount > 1 ? await deriveChunkIv(baseIv, i) : baseIv;
+    const cipher = await crypto.subtle.encrypt(
+      { name: "AES-GCM", iv: chunkIv, additionalData: aad },
+      aesKey, chunk
+    );
+    secureClear(chunk);
+    secureClear(aesKey);
+
+    // Yield: chunk length (4 bytes) + raw cipher bytes
+    const lenBuf = new Uint8Array(4);
+    new DataView(lenBuf.buffer).setUint32(0, cipher.byteLength, false);
+    yield lenBuf;
+    yield new Uint8Array(cipher);
+
+    if(onProgress) onProgress((i + 1) / chunkCount);
+    await yieldToUI();
+  }
 }

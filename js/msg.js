@@ -20,6 +20,7 @@
 /* ---------- Inline messages (showInlineMessage) ---------- */
 
 const MSG_CLIPBOARD_FAILED       = "⚠️ Could not read from clipboard. Please paste manually.";
+const MSG_CLIPBOARD_WRITE_FAILED = "⚠️ Could not write to clipboard. Use Export below to save as a file instead.";
 const MSG_NOTHING_TO_COPY        = "⚠️ Nothing here to copy yet";
 const MSG_TOO_LARGE_TO_COPY      = "⚠️ This message is too large to copy to the clipboard. Use Export below to save it as a file instead.";
 const MSG_NOTHING_DECRYPTED      = "⚠️ Nothing decrypted yet";
@@ -40,6 +41,7 @@ const MSG_CANT_SEND_YET          = "⚠️ You can't send yet — your peer need
 const MSG_ENCRYPT_FAILED         = "❌ Encryption failed unexpectedly (see console).";
 const MSG_DECRYPT_FILE_PROMPT    = (name, size) => `🔓 [File: ${name} — ${size}] Use Export below to save it.`;
 const MSG_DECRYPTED_LARGE        = (size) => `🔓 Decrypted — ${size} of text. Too large to display here. Use Export or Copy below.`;
+const MSG_DECRYPTED_PREFIX        = "🔓 ";
 const MSG_DECRYPT_FAILED         = "❌ Couldn't decrypt this message — ";
 const MSG_DECRYPT_BAD_FORMAT     = "it isn't in a format this tool recognizes (wrong version, or not from this tool at all).";
 const MSG_DECRYPT_MISSING_FIELDS = "the message header is missing required fields.";
@@ -66,11 +68,15 @@ const CONFIRM_PRIVKEY_EXPOSURE   = (action) =>
   `Anyone who obtains it can read your messages and impersonate you. ` +
   `Only continue if you're sure of where it's going (or who's looking at your screen).`;
 const CONFIRM_SESSION_RESET      = "This will end the current secure session. You won't be able to decrypt any messages from this conversation afterward (though your keys stay intact). Continue?";
+const CONFIRM_KEY_REPLACEMENT    = "You already have a key pair. Generating a new one will replace it — any encrypted messages sent to you with the old key won't be decryptable anymore. Continue?";
 const CONFIRM_LARGE_IMPORT       = (size) => `⚠️ File is ${size} — too large to import safely. The browser may crash or become unresponsive.`;
+const CONFIRM_LARGE_ENCRYPT      = (size) => `⚠️ File is ${size}. Your browser will need roughly twice that much RAM to encrypt and download it. Continue?`;
+const MSG_STREAMING_UNAVAILABLE  = "⚠️ Your browser doesn't support direct-to-disk saving. The encrypted file will be buffered in memory — may use a lot of RAM.";
 const BTN_CONTINUE               = "✅ Continue";
 const BTN_CANCEL                 = "❌ Cancel";
 const BTN_IMPORT_ANYWAY          = "✅ Import anyway";
 const BTN_RESET_SESSION          = "✅ Reset session";
+const BTN_GENERATE_NEW_KEYS      = "✅ Generate new keys";
 
 /* ---------- Progress labels ---------- */
 
