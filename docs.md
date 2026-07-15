@@ -112,7 +112,7 @@ key), `header.n` and `header.pn` must be non-negative integers, and
 
 ### 2.4 What's *not* covered
 
-This is a demo-grade implementation, not an audited protocol:
+This is a reference implementation, not an audited protocol:
 
 - No X3DH-style pre-key bundles — the initial handshake is a single static
   ECDH, so there's no protection if a long-term private key is later
@@ -313,6 +313,12 @@ explained in the comment block at the top of `js/constants.js`:
 | `MAX_SKIP` | 1000 | Max out-of-order messages skippable in one jump. |
 | `MAX_SKIPPED_KEYS` | 2000 | Max cached out-of-order message keys (LRU-evicted when full). |
 | `DECRYPT_RATE_LIMIT` | 2 | Max decryption attempts per second per session. |
+| `STREAMING_ENCRYPT_THRESHOLD` | 256 MB | Above this, encrypt streams directly from file via `streamingEncryptExport` (avoids holding full plaintext in memory). |
+| `GCM_CHUNK_BYTES` | 512 MB | Max plaintext per AES-GCM chunk (well under the 2 GiB SubtleCrypto limit). Overridable for testing. |
+| `FILE_READ_CHUNK` | 128 MB | File read chunk size for the non-streaming encrypt path (avoids 2 GiB `arrayBuffer` truncation). |
+| `PRIVKEY_CONFIRM_TIMEOUT` | 10 s | Private-key exposure warnings auto-dismiss (cancel) after this many ms. |
+| `PRIVKEY_AUTOHIDE_TIMEOUT` | 15 s | Revealed private key auto-hides after this many ms. |
+| `DEBUG` | `false` | When `true`, gates all `console.error` calls for development diagnostics. |
 
 ### Progress indicator
 
@@ -420,15 +426,20 @@ that file was already organized into internally:
   named constants. No dependencies on other files; loaded after
   `constants.js` but before `crypto-core.js`.
 - **`crypto-core.js`** — `generateIdentityKeyPair`, `generateDHKeyPair`,
-  `dh`, `kdfRK`, `kdfCK`, `deriveMessageAesKey`, `fingerprintOf`,
-  `computeInitialSharedSecret`, and the `RatchetSession` class
-  (`encrypt`/`decrypt`/`clear`) described in §2. Depends on `constants.js` for
-  the byte helpers, `MAX_SKIP`/`MAX_SKIPPED_KEYS`, and `DECRYPT_RATE_LIMIT`.
+  `dh`, `kdfRK`, `kdfCK`, `deriveMessageAesKey`, `deriveChunkIv`,
+  `fingerprintOf`, `sessionFingerprintOf`, `computeInitialSharedSecret`,
+  and the `RatchetSession` class (`encrypt`/`decrypt`/`clear`) described
+  in §2. Depends on `constants.js` for the byte helpers,
+  `MAX_SKIP`/`MAX_SKIPPED_KEYS`, and `DECRYPT_RATE_LIMIT`.
 - **`large-payload.js`** — `bytesToBase64Chunks`/`base64ChunksToBytes`,
   `buildLargeExportParts`/`streamingParseLargeFile` (legacy text `.scl` format),
-  `buildLargeExportPartsBinary`/`streamingParseLargeBinaryFile` (current binary `.scb` format, §3.2, §4).
-  Depends on `constants.js` (`yieldToUI`, `maskBytes`/`unmaskBytes`, thresholds,
-  binary magic constants); does not depend on `crypto-core.js`.
+  `buildLargeExportPartsBinary`/`streamingParseLargeBinaryFile` (current binary `.scb` format, §3.2, §4),
+  and `streamingEncryptExport` (async generator that reads a `File` via
+  `slice()`, encrypts each chunk immediately, and yields binary export parts
+  incrementally — neither the full plaintext nor full ciphertext is ever
+  held in memory). Depends on `constants.js` (`yieldToUI`, `maskBytes`/
+  `unmaskBytes`, thresholds, binary magic constants); does not depend on
+  `crypto-core.js`.
 - **`ui.js`** — session state (`kp`, `session`, `myPrivKeyB64`,
   `lastEncryptedPacketB64`), theme toggle, the
   `Progress` indicator module, status/copy/export/import helpers, key

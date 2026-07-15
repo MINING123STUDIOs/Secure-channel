@@ -1,6 +1,6 @@
 <!DOCTYPE html>
 <!--
-  Secure Channel Assistant — end-to-end encrypted messaging demo with a
+  Secure Channel Assistant — end-to-end encrypted messaging with a
   Double Ratchet (Signal-style) key exchange.
   Copyright (C) 2026 MINING123STUDIOS
 
@@ -20,7 +20,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8" />
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'; connect-src 'none'; frame-src 'none'; object-src 'none'; base-uri 'self'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'; connect-src 'none'; frame-src 'none'; object-src 'none'; base-uri 'self'; form-action 'none'; require-trusted-types-for 'script'">
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
 <title>Secure Channel Assistant v4</title>
 <link rel="stylesheet" href="style.css">
@@ -188,5 +188,10 @@
 <script src="js/crypto-core.js"></script>
 <script src="js/large-payload.js"></script>
 <script src="js/ui.js"></script>
+<script>
+if('serviceWorker' in navigator){
+  navigator.serviceWorker.register('./sw.js').catch(()=>{});
+}
+</script>
 </body>
 </html>
